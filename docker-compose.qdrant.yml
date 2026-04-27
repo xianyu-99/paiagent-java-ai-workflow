@@ -1,0 +1,15 @@
+name: ai-infra
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    container_name: qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  qdrant_data:
+    name: ${QDRANT_VOLUME_NAME:-ai-infra_qdrant_data}

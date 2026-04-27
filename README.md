@@ -153,6 +153,7 @@ Qdrant collection 会按 Embedding 类型和维度自动隔离，例如 `paiagen
 ### Docker Compose 一键部署
 
 - 提供 MySQL、Redis、MinIO、Qdrant、后端、前端的一键编排
+- 额外提供外部依赖版 Compose，可只启动 PaiAgent 前后端并连接已有基础设施
 - 前端使用 Nginx 托管静态资源，并反向代理 `/api`
 - 支持本机演示和局域网访问
 
@@ -301,7 +302,12 @@ admin / admin123
 
 ## Docker Compose 部署
 
-项目根目录提供 `docker-compose.yml`，可一键启动完整演示环境。
+项目提供两种 Compose 模式：
+
+- `docker-compose.yml`：完整演示版，启动前端、后端、MySQL、Redis、MinIO、Qdrant，适合新电脑一键运行。
+- `docker-compose.app.yml`：外部依赖版，只启动前端、后端，连接已有 MySQL、Redis、MinIO、Qdrant。
+
+完整演示版：
 
 ```powershell
 docker compose up -d --build
@@ -313,6 +319,26 @@ docker compose up -d --build
 前端：http://localhost:5173
 后端 Swagger：http://localhost:8085/swagger-ui.html
 MinIO Console：http://localhost:9001
+```
+
+外部依赖版：
+
+```powershell
+Copy-Item .env.external.example .env.external
+docker compose --env-file .env.external -f docker-compose.app.yml up -d --build
+```
+
+外部依赖版默认访问：
+
+```text
+前端：http://localhost:5174
+后端 Swagger：http://localhost:8085/swagger-ui.html
+```
+
+如果只缺少独立 Qdrant，可以单独启动：
+
+```powershell
+docker compose -f docker-compose.qdrant.yml up -d
 ```
 
 如果需要局域网访问，修改根目录 `.env`：
