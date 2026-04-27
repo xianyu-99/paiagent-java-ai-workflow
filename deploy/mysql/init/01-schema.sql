@@ -63,6 +63,48 @@ CREATE TABLE IF NOT EXISTS execution_record (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS knowledge_base (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    owner_id BIGINT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_kb_owner_id (owner_id),
+    INDEX idx_kb_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS knowledge_document (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    owner_id BIGINT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    content_hash VARCHAR(64) NOT NULL,
+    chunk_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_doc_kb_id (knowledge_base_id),
+    INDEX idx_doc_owner_id (owner_id),
+    INDEX idx_doc_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    document_id BIGINT NOT NULL,
+    chunk_index INT NOT NULL,
+    content MEDIUMTEXT NOT NULL,
+    embedding JSON NOT NULL,
+    token_count INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_chunk_kb_id (knowledge_base_id),
+    INDEX idx_chunk_doc_id (document_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS llm_global_config (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     provider VARCHAR(50) NOT NULL,
@@ -124,4 +166,8 @@ INSERT IGNORE INTO node_definition (node_type, display_name, category, icon, inp
 ('condition', '条件分支', 'FLOW', '🔀',
  '{"type":"object","properties":{"input":{"type":"string"},"output":{"type":"string"}}}',
  '{"type":"object","properties":{"conditionResult":{"type":"boolean"},"selectedBranch":{"type":"string"},"output":{"type":"string"}}}',
- '{"type":"object","properties":{"leftType":{"type":"string","default":"reference"},"leftReference":{"type":"string"},"leftValue":{"type":"string"},"operator":{"type":"string","default":"equals"},"rightValue":{"type":"string"},"caseSensitive":{"type":"boolean","default":false}}}');
+ '{"type":"object","properties":{"leftType":{"type":"string","default":"reference"},"leftReference":{"type":"string"},"leftValue":{"type":"string"},"operator":{"type":"string","default":"equals"},"rightValue":{"type":"string"},"caseSensitive":{"type":"boolean","default":false}}}'),
+('rag', '知识库问答', 'KNOWLEDGE', '📚',
+ '{"type":"object","properties":{"question":{"type":"string"}}}',
+ '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"}}}',
+ '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"configId":{"type":"number"},"prompt":{"type":"string"}}}');

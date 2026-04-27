@@ -19,7 +19,7 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 - 大模型应用开发练习与面试展示
 - Java 后端 AI Agent / Workflow 项目复现
 - LLM、TTS、对象存储、SSE 调试的工程化整合
-- 已支持 DAG / LangGraph 条件分支，后续可扩展 RAG、分类器、Agent 状态流等能力
+- 已支持 DAG / LangGraph 条件分支、RAG 知识库问答，后续可扩展分类器、Agent 状态流等能力
 
 ## 核心功能
 
@@ -72,6 +72,15 @@ TTS 节点已经实现完整链路：
 - 下载多个音频片段并合并为单个 WAV 文件
 - 上传合并后的音频到 MinIO
 - 返回可直接访问的预签名音频 URL
+
+### RAG 知识库节点
+
+- 支持创建用户级知识库
+- 支持导入 txt / markdown 文本内容
+- 后端自动按长度和标点进行文本切片
+- 使用本地 Hash Embedding 生成向量，支持余弦相似度检索
+- RAG 节点先召回相关知识片段，再将 `context + question` 拼入 LLM 提示词生成回答
+- 节点执行过程通过 `NODE_PROGRESS` 推送“检索中 / 检索完成”等状态
 
 ### 实时执行调试
 
@@ -134,6 +143,7 @@ MySQL
 
 Backend -> Redis      : refresh token / runtime cache
 Backend -> MinIO      : audio file storage
+Backend -> MySQL      : workflow / execution / knowledge base / vectors
 Backend -> LLM / TTS  : model provider API
 ```
 
@@ -286,24 +296,26 @@ http://你的局域网IP:5173
 - 增加执行可靠性基础版：运行中状态记录、节点超时、失败重试、错误日志、重试事件推送
 - 增加 DAG if/else 条件分支节点：支持 true / false 出口、上游参数引用和动态分支执行
 - 跑通 LangGraph4j conditional edge 条件分支和基础循环执行，并补充自动化测试
+- 增加 RAG 知识库节点：知识库创建、文本导入、自动切片、本地向量化、相似度检索和 LLM 回答
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
 
 ## 当前边界
 
 - DAG 引擎是当前主要稳定路径，适合常规工作流执行
 - LangGraph4j 已支持条件分支和基础循环，但复杂 Agent 状态流、人工中断、检查点恢复仍属于后续增强方向
-- RAG 知识库节点暂未实现
+- RAG 当前使用本地 Hash Embedding，适合演示和复现；生产环境可替换为 BGE / text-embedding / DashScope Embedding 等模型向量
+- RAG 当前支持文本内容导入，PDF / Word 解析、多知识库权限审计和向量数据库可继续扩展
 - 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 
 ## 简历描述参考
 
-> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 LangGraph4j 状态图引擎，支持 conditional edge 条件路由和基础循环状态流；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
+> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 LangGraph4j 状态图引擎，支持 conditional edge 条件路由和基础循环状态流；实现 RAG 知识库节点，支持文本导入、自动切片、本地向量化、相似度检索和基于检索上下文的 LLM 回答；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
 
 ## 后续规划
 
 - 增加分类器节点和更复杂的多分支路由节点
 - 增强 LangGraph4j Agent 状态流、检查点恢复和人工中断
-- 增加 RAG 知识库节点：文件上传、切片、Embedding、向量检索、LLM 回答
+- 增强 RAG：接入真实 Embedding 模型、PDF / Word 解析、向量数据库和多知识库管理
 - 增加执行中断、工作流版本发布和执行快照
 - 增加更多模型供应商和统一模型健康检查
 

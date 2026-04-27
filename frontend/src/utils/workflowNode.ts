@@ -12,6 +12,8 @@ const getFallbackLabel = (nodeType: string, nodeId: string) => {
       return '语音合成';
     case 'condition':
       return '条件分支';
+    case 'rag':
+      return '知识库问答';
     case 'llm':
       return '大模型';
     default:

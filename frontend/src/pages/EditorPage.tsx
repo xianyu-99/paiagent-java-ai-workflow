@@ -12,6 +12,12 @@ import { useWorkflowStore } from '../store/workflowStore';
 import { useAuthStore } from '../store/authStore';
 import { useLLMConfigStore } from '../store/llmConfigStore';
 import { createWorkflow, updateWorkflow, getWorkflows, getWorkflow, deleteWorkflow, Workflow } from '../api/workflow';
+import {
+  createKnowledgeBase,
+  listKnowledgeBases,
+  uploadKnowledgeDocument,
+  KnowledgeBase,
+} from '../api/knowledge';
 import { getRefreshToken } from '../utils/auth';
 import {
   getProviderFromNodeType,
@@ -62,6 +68,15 @@ interface ConditionConfig {
   operator: string;
   rightValue: string;
   caseSensitive: boolean;
+}
+
+interface RagConfig {
+  knowledgeBaseId?: number;
+  configId?: number;
+  questionReference?: string;
+  topK: number;
+  minScore: number;
+  prompt: string;
 }
 
 interface WorkflowCanvasData {
@@ -123,6 +138,19 @@ const EditorPage = () => {
     rightValue: '',
     caseSensitive: false
   });
+  const [ragConfig, setRagConfig] = useState<RagConfig>({
+    knowledgeBaseId: undefined,
+    configId: undefined,
+    questionReference: 'input-default.user_input',
+    topK: 3,
+    minScore: 0,
+    prompt: ''
+  });
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState('');
+  const [newKnowledgeBaseDescription, setNewKnowledgeBaseDescription] = useState('');
+  const [knowledgeFileName, setKnowledgeFileName] = useState('manual.txt');
+  const [knowledgeContent, setKnowledgeContent] = useState('');
 
   // 自动保存定时器
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -205,6 +233,17 @@ const EditorPage = () => {
         rightValue: (node.data?.rightValue as string) || '',
         caseSensitive: Boolean(node.data?.caseSensitive)
       });
+    } else if (node.data?.type === 'rag') {
+      const inputParams = (node.data?.inputParams as LlmInputParam[]) || [];
+      const questionParam = inputParams.find(param => param.name === 'question');
+      setRagConfig({
+        knowledgeBaseId: (node.data?.knowledgeBaseId as number) || undefined,
+        configId: (node.data?.configId as number) || undefined,
+        questionReference: questionParam?.referenceNode || 'input-default.user_input',
+        topK: (node.data?.topK as number) || 3,
+        minScore: (node.data?.minScore as number) || 0,
+        prompt: (node.data?.prompt as string) || ''
+      });
     }
   };
 
@@ -212,6 +251,21 @@ const EditorPage = () => {
   useEffect(() => {
     fetchLLMGlobalConfigs();
   }, [fetchLLMGlobalConfigs]);
+
+  const refreshKnowledgeBases = useCallback(async () => {
+    try {
+      const response = await listKnowledgeBases();
+      if (response.code === 200) {
+        setKnowledgeBases(response.data || []);
+      }
+    } catch (error) {
+      console.error('加载知识库失败:', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshKnowledgeBases();
+  }, [refreshKnowledgeBases]);
 
   // 当全局配置异步加载完成后，补齐当前选中节点的展示配置
   useEffect(() => {
@@ -416,6 +470,8 @@ const EditorPage = () => {
         return ['audioUrl', 'fileName', 'output'];
       case 'condition':
         return ['conditionResult', 'selectedBranch', 'output'];
+      case 'rag':
+        return ['output', 'context', 'retrievedCount'];
       default:
         return ['output'];
     }
@@ -772,6 +828,82 @@ const EditorPage = () => {
       ...conditionConfig,
     });
     message.success('条件配置保存成功');
+  };
+
+  const handleSaveRagConfig = () => {
+    if (!selectedNode) return;
+    if (!ragConfig.knowledgeBaseId) {
+      message.warning('请选择知识库');
+      return;
+    }
+    if (!ragConfig.configId) {
+      message.warning('请选择用于回答的全局 LLM 配置');
+      return;
+    }
+    if (!ragConfig.questionReference) {
+      message.warning('请选择问题来源');
+      return;
+    }
+
+    useWorkflowStore.getState().updateNode(selectedNode.id, {
+      ...selectedNode.data,
+      knowledgeBaseId: ragConfig.knowledgeBaseId,
+      configId: ragConfig.configId,
+      topK: ragConfig.topK,
+      minScore: ragConfig.minScore,
+      prompt: ragConfig.prompt,
+      inputParams: [
+        {
+          name: 'question',
+          type: 'reference',
+          referenceNode: ragConfig.questionReference
+        }
+      ],
+      outputParams: [{ name: 'output', type: 'string' }]
+    });
+    message.success('RAG 节点配置保存成功');
+  };
+
+  const handleCreateKnowledgeBase = async () => {
+    if (!newKnowledgeBaseName.trim()) {
+      message.warning('请填写知识库名称');
+      return;
+    }
+    const response = await createKnowledgeBase({
+      name: newKnowledgeBaseName.trim(),
+      description: newKnowledgeBaseDescription.trim()
+    });
+    if (response.code === 200) {
+      message.success('知识库创建成功');
+      setNewKnowledgeBaseName('');
+      setNewKnowledgeBaseDescription('');
+      await refreshKnowledgeBases();
+      setRagConfig({ ...ragConfig, knowledgeBaseId: response.data.id });
+    } else {
+      message.error(response.message || '知识库创建失败');
+    }
+  };
+
+  const handleUploadKnowledgeDocument = async () => {
+    if (!ragConfig.knowledgeBaseId) {
+      message.warning('请先选择知识库');
+      return;
+    }
+    if (!knowledgeContent.trim()) {
+      message.warning('请填写要导入的知识文本');
+      return;
+    }
+    const response = await uploadKnowledgeDocument(ragConfig.knowledgeBaseId, {
+      fileName: knowledgeFileName || 'manual.txt',
+      content: knowledgeContent
+    });
+    if (response.code === 200) {
+      message.success(`文档导入成功，生成 ${response.data.chunkCount} 个切片`);
+      setKnowledgeContent('');
+      await refreshKnowledgeBases();
+    } else {
+      message.error(response.message || '文档导入失败');
+    }
   };
 
   // 添加 LLM 输出参数
@@ -1706,12 +1838,140 @@ const EditorPage = () => {
                   </Form>
                 )}
 
+                {/* RAG 知识库节点配置 */}
+                {selectedNode.data?.type === 'rag' && (
+                  <Form layout="vertical" className="mt-4">
+                    <div className="mb-4 p-3 bg-blue-50 rounded text-sm text-blue-700">
+                      RAG 节点会先检索知识库片段，再把上下文和问题交给 LLM 生成答案。
+                    </div>
+
+                    <Form.Item label="知识库" required>
+                      <Select
+                        placeholder="选择知识库"
+                        value={ragConfig.knowledgeBaseId}
+                        onChange={(value) => setRagConfig({ ...ragConfig, knowledgeBaseId: value })}
+                        style={{ width: '100%' }}
+                      >
+                        {knowledgeBases.map(kb => (
+                          <Select.Option key={kb.id} value={kb.id}>
+                            {kb.name}（文档 {kb.documentCount || 0} / 切片 {kb.chunkCount || 0}）
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+
+                    <div className="mb-4 p-3 border rounded bg-gray-50">
+                      <div className="font-medium text-gray-700 mb-2">新建知识库</div>
+                      <Input
+                        className="mb-2"
+                        placeholder="知识库名称"
+                        value={newKnowledgeBaseName}
+                        onChange={(e) => setNewKnowledgeBaseName(e.target.value)}
+                      />
+                      <Input
+                        className="mb-2"
+                        placeholder="知识库描述，可选"
+                        value={newKnowledgeBaseDescription}
+                        onChange={(e) => setNewKnowledgeBaseDescription(e.target.value)}
+                      />
+                      <Button block onClick={handleCreateKnowledgeBase}>
+                        创建并选中
+                      </Button>
+                    </div>
+
+                    <div className="mb-4 p-3 border rounded bg-gray-50">
+                      <div className="font-medium text-gray-700 mb-2">导入知识文本</div>
+                      <Input
+                        className="mb-2"
+                        placeholder="文件名，如 faq.md"
+                        value={knowledgeFileName}
+                        onChange={(e) => setKnowledgeFileName(e.target.value)}
+                      />
+                      <Input.TextArea
+                        rows={5}
+                        placeholder="粘贴 txt / markdown 文本，后端会自动切片并向量化"
+                        value={knowledgeContent}
+                        onChange={(e) => setKnowledgeContent(e.target.value)}
+                      />
+                      <Button className="mt-2" block onClick={handleUploadKnowledgeDocument}>
+                        上传并切片
+                      </Button>
+                    </div>
+
+                    <Form.Item label="问题来源" required>
+                      <Select
+                        placeholder="选择用户问题来源"
+                        value={ragConfig.questionReference}
+                        onChange={(value) => setRagConfig({ ...ragConfig, questionReference: value })}
+                        style={{ width: '100%' }}
+                      >
+                        {getReferenceableParams().map((p) => (
+                          <Select.Option key={p.value} value={p.value}>
+                            {p.label}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+
+                    <Form.Item label="LLM 全局配置" required>
+                      <Select
+                        placeholder="选择用于生成答案的模型配置"
+                        value={ragConfig.configId}
+                        onChange={(value) => setRagConfig({ ...ragConfig, configId: value })}
+                        style={{ width: '100%' }}
+                      >
+                        {llmGlobalConfigs.map(config => (
+                          <Select.Option key={config.id} value={config.id}>
+                            {getProviderLabel(config.provider)} / {config.configName}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <Form.Item label="召回数量 topK">
+                        <Input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={ragConfig.topK}
+                          onChange={(e) => setRagConfig({ ...ragConfig, topK: Number(e.target.value || 3) })}
+                        />
+                      </Form.Item>
+                      <Form.Item label="最低相似度">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={ragConfig.minScore}
+                          onChange={(e) => setRagConfig({ ...ragConfig, minScore: Number(e.target.value || 0) })}
+                        />
+                      </Form.Item>
+                    </div>
+
+                    <Form.Item label="回答提示词">
+                      <Input.TextArea
+                        rows={6}
+                        placeholder="留空使用默认 RAG 提示词；可使用 {{context}} 和 {{question}}"
+                        value={ragConfig.prompt}
+                        onChange={(e) => setRagConfig({ ...ragConfig, prompt: e.target.value })}
+                      />
+                    </Form.Item>
+
+                    <Button type="primary" block onClick={handleSaveRagConfig}>
+                      保存配置
+                    </Button>
+                  </Form>
+                )}
+
                 {/* 其他节点配置 */}
                 {selectedNode.data?.type !== 'input' &&
                  selectedNode.data?.type !== 'output' &&
                  !isLlmNodeType(selectedNodeType) &&
                  selectedNode.data?.type !== 'tts' &&
-                 selectedNode.data?.type !== 'condition' && (
+                 selectedNode.data?.type !== 'condition' &&
+                 selectedNode.data?.type !== 'rag' && (
                   <div className="mt-4 text-center text-gray-400 text-sm">
                     该节点暂无可配置项
                   </div>

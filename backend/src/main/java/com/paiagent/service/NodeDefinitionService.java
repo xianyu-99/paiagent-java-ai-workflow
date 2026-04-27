@@ -24,6 +24,7 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
 
         nodeDefinitionMap.putIfAbsent("llm", createGenericLlmNodeDefinition());
         nodeDefinitionMap.putIfAbsent("condition", createConditionNodeDefinition());
+        nodeDefinitionMap.putIfAbsent("rag", createRagNodeDefinition());
 
         return nodeDefinitionMap.values().stream()
                 .filter(node -> node.getDeleted() == null || node.getDeleted() == 0)
@@ -39,6 +40,9 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         }
         if ("condition".equals(nodeType)) {
             return createConditionNodeDefinition();
+        }
+        if ("rag".equals(nodeType)) {
+            return createRagNodeDefinition();
         }
 
         return this.lambdaQuery()
@@ -67,6 +71,18 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"conditionResult\":{\"type\":\"boolean\"},\"selectedBranch\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
         nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"leftType\":{\"type\":\"string\",\"default\":\"reference\"},\"leftReference\":{\"type\":\"string\"},\"leftValue\":{\"type\":\"string\"},\"operator\":{\"type\":\"string\",\"default\":\"equals\"},\"rightValue\":{\"type\":\"string\"},\"caseSensitive\":{\"type\":\"boolean\",\"default\":false}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createRagNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("rag");
+        nodeDefinition.setDisplayName("知识库问答");
+        nodeDefinition.setCategory("KNOWLEDGE");
+        nodeDefinition.setIcon("📚");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"context\":{\"type\":\"string\"},\"retrievedChunks\":{\"type\":\"array\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"knowledgeBaseId\":{\"type\":\"number\"},\"topK\":{\"type\":\"number\",\"default\":3},\"minScore\":{\"type\":\"number\",\"default\":0},\"configId\":{\"type\":\"number\"},\"prompt\":{\"type\":\"string\"}}}");
         return nodeDefinition;
     }
 }

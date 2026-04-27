@@ -71,6 +71,51 @@ CREATE TABLE IF NOT EXISTS execution_record (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='执行记录表';
 
+-- RAG 知识库表
+CREATE TABLE IF NOT EXISTS knowledge_base (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '知识库主键 ID',
+    name VARCHAR(255) NOT NULL COMMENT '知识库名称',
+    description TEXT COMMENT '知识库描述',
+    owner_id BIGINT NULL COMMENT '知识库所有者用户 ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_kb_owner_id (owner_id),
+    INDEX idx_kb_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库表';
+
+-- RAG 文档表
+CREATE TABLE IF NOT EXISTS knowledge_document (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '文档主键 ID',
+    knowledge_base_id BIGINT NOT NULL COMMENT '知识库 ID',
+    owner_id BIGINT NULL COMMENT '上传用户 ID',
+    file_name VARCHAR(255) NOT NULL COMMENT '文件名',
+    content_hash VARCHAR(64) NOT NULL COMMENT '文档内容 SHA-256',
+    chunk_count INT DEFAULT 0 COMMENT '切片数量',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_doc_kb_id (knowledge_base_id),
+    INDEX idx_doc_owner_id (owner_id),
+    INDEX idx_doc_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库文档表';
+
+-- RAG 文本切片与向量表
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '切片主键 ID',
+    knowledge_base_id BIGINT NOT NULL COMMENT '知识库 ID',
+    document_id BIGINT NOT NULL COMMENT '文档 ID',
+    chunk_index INT NOT NULL COMMENT '文档内切片序号',
+    content MEDIUMTEXT NOT NULL COMMENT '切片文本',
+    embedding JSON NOT NULL COMMENT '切片向量 JSON',
+    token_count INT DEFAULT 0 COMMENT '估算 token 数',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_chunk_kb_id (knowledge_base_id),
+    INDEX idx_chunk_doc_id (document_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表';
+
 -- 插入预置节点定义数据
 INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema) VALUES
 ('input', '输入', 'IO', '📥',
@@ -111,7 +156,12 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 ('condition', '条件分支', 'FLOW', '🔀',
  '{"type": "object", "properties": {"input": {"type": "string"}, "output": {"type": "string"}}}',
  '{"type": "object", "properties": {"conditionResult": {"type": "boolean"}, "selectedBranch": {"type": "string"}, "output": {"type": "string"}}}',
- '{"type": "object", "properties": {"leftType": {"type": "string", "default": "reference"}, "leftReference": {"type": "string"}, "leftValue": {"type": "string"}, "operator": {"type": "string", "default": "equals"}, "rightValue": {"type": "string"}, "caseSensitive": {"type": "boolean", "default": false}}}')
+ '{"type": "object", "properties": {"leftType": {"type": "string", "default": "reference"}, "leftReference": {"type": "string"}, "leftValue": {"type": "string"}, "operator": {"type": "string", "default": "equals"}, "rightValue": {"type": "string"}, "caseSensitive": {"type": "boolean", "default": false}}}'),
+
+('rag', '知识库问答', 'KNOWLEDGE', '📚',
+ '{"type": "object", "properties": {"question": {"type": "string"}}}',
+ '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "retrievedChunks": {"type": "array"}}}',
+ '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
 ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
 
 -- 全局 LLM 配置表

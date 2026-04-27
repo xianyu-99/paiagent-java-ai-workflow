@@ -160,6 +160,15 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
                 caseSensitive: false,
               }
             : {}),
+          ...(type === 'rag'
+            ? {
+                topK: 3,
+                minScore: 0,
+                prompt: '',
+                inputParams: [{ name: 'question', type: 'reference', referenceNode: 'input-default.user_input' }],
+                outputParams: [{ name: 'output', type: 'string' }],
+              }
+            : {}),
         },
       };
 

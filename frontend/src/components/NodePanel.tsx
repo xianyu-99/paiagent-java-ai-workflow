@@ -39,6 +39,7 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
   // 按分类分组节点
   const llmNodes = nodeTypes.filter((node) => node.category === 'LLM');
   const flowNodes = nodeTypes.filter((node) => node.category === 'FLOW');
+  const knowledgeNodes = nodeTypes.filter((node) => node.category === 'KNOWLEDGE');
   const toolNodes = nodeTypes.filter((node) => node.category === 'TOOL');
 
   const renderNodeItem = (node: NodeDefinition) => (
@@ -83,6 +84,19 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
       ),
     },
     {
+      key: 'knowledge',
+      label: <span className="font-semibold">📚 知识库</span>,
+      children: (
+        <div>
+          {knowledgeNodes.length > 0 ? (
+            knowledgeNodes.map(renderNodeItem)
+          ) : (
+            <div className="text-gray-400 text-center py-4">暂无节点</div>
+          )}
+        </div>
+      ),
+    },
+    {
       key: 'tool',
       label: <span className="font-semibold">🔧 工具节点</span>,
       children: (
@@ -108,7 +122,7 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
         ) : (
           <>
             <Collapse
-              defaultActiveKey={['llm', 'flow', 'tool']}
+              defaultActiveKey={['llm', 'flow', 'knowledge', 'tool']}
               ghost
               items={items}
               bordered={false}
