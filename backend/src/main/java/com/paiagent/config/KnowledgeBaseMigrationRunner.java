@@ -25,6 +25,7 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         migrateKnowledgeChunkEmbeddingMetadata();
         migrateKnowledgeChunkSourceMetadata();
         createKnowledgeImportTaskTable();
+        upsertTtsNodeDefinition();
         upsertRagNodeDefinition();
     }
 
@@ -200,5 +201,28 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     updated_at = CURRENT_TIMESTAMP
                 """);
         log.info("RAG 知识库表与节点定义迁移完成");
+    }
+
+    private void upsertTtsNodeDefinition() {
+        jdbcTemplate.update("""
+                INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema)
+                VALUES (
+                    'tts',
+                    '超拟人音频合成',
+                    'TOOL',
+                    '🔊',
+                    '{"type":"object","properties":{"text":{"type":"string"}}}',
+                    '{"type":"object","properties":{"audioUrl":{"type":"string"},"fileName":{"type":"string"},"output":{"type":"string"},"chunks":{"type":"number"}}}',
+                    '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen3-tts-flash"},"voice":{"type":"string","default":"Cherry"},"languageType":{"type":"string","default":"Auto"}}}'
+                )
+                ON DUPLICATE KEY UPDATE
+                    display_name = VALUES(display_name),
+                    category = VALUES(category),
+                    icon = VALUES(icon),
+                    input_schema = VALUES(input_schema),
+                    output_schema = VALUES(output_schema),
+                    config_schema = VALUES(config_schema),
+                    updated_at = CURRENT_TIMESTAMP
+                """);
     }
 }

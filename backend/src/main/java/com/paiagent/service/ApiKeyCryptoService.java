@@ -19,6 +19,7 @@ import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Map;
 import java.util.function.Function;
 
 @Service
@@ -26,6 +27,7 @@ public class ApiKeyCryptoService {
 
     private static final Logger log = LoggerFactory.getLogger(ApiKeyCryptoService.class);
     private static final String PREFIX = "enc:v1:";
+    private static final String API_KEY_CONFIGURED_FIELD = "apiKeyConfigured";
     private static final String ALGORITHM = "AES/GCM/NoPadding";
     private static final int IV_LENGTH_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;
@@ -106,6 +108,37 @@ public class ApiKeyCryptoService {
         return transformApiKeysInJson(json, this::decrypt);
     }
 
+    public String maskApiKeysInJson(String json) {
+        if (!StringUtils.hasText(json)) {
+            return json;
+        }
+
+        try {
+            Object parsed = JSON.parse(json);
+            maskApiKeyValue(parsed);
+            return JSON.toJSONString(parsed);
+        } catch (Exception e) {
+            log.warn("Failed to mask apiKey fields in JSON payload; keeping original content", e);
+            return json;
+        }
+    }
+
+    public String preserveMissingApiKeysInJson(String incomingJson, String existingJson) {
+        if (!StringUtils.hasText(incomingJson) || !StringUtils.hasText(existingJson)) {
+            return incomingJson;
+        }
+
+        try {
+            Object incoming = JSON.parse(incomingJson);
+            Object existing = JSON.parse(existingJson);
+            preserveApiKeyValue(incoming, existing);
+            return JSON.toJSONString(incoming);
+        } catch (Exception e) {
+            log.warn("Failed to preserve apiKey fields in JSON payload; keeping incoming content", e);
+            return incomingJson;
+        }
+    }
+
     private String transformApiKeysInJson(String json, Function<String, String> transformer) {
         if (!StringUtils.hasText(json)) {
             return json;
@@ -139,6 +172,76 @@ public class ApiKeyCryptoService {
                 transformValue(item, transformer);
             }
         }
+    }
+
+    private void maskApiKeyValue(Object value) {
+        if (value instanceof JSONObject object) {
+            for (String key : new ArrayList<>(object.keySet())) {
+                Object child = object.get(key);
+                if ("apiKey".equals(key) && child instanceof String text && StringUtils.hasText(text)) {
+                    object.put(key, "");
+                    object.put(API_KEY_CONFIGURED_FIELD, true);
+                } else {
+                    maskApiKeyValue(child);
+                }
+            }
+            return;
+        }
+
+        if (value instanceof JSONArray array) {
+            for (Object item : array) {
+                maskApiKeyValue(item);
+            }
+        }
+    }
+
+    private void preserveApiKeyValue(Object incoming, Object existing) {
+        if (incoming instanceof JSONObject incomingObject && existing instanceof JSONObject existingObject) {
+            Object incomingApiKey = incomingObject.get("apiKey");
+            Object existingApiKey = existingObject.get("apiKey");
+            if (isMissingApiKey(incomingApiKey) && existingApiKey instanceof String text && StringUtils.hasText(text)) {
+                incomingObject.put("apiKey", text);
+            }
+
+            for (String key : new ArrayList<>(incomingObject.keySet())) {
+                if ("apiKey".equals(key)) {
+                    continue;
+                }
+                preserveApiKeyValue(incomingObject.get(key), existingObject.get(key));
+            }
+            return;
+        }
+
+        if (incoming instanceof JSONArray incomingArray && existing instanceof JSONArray existingArray) {
+            Map<String, JSONObject> existingById = new java.util.HashMap<>();
+            for (Object existingItem : existingArray) {
+                if (existingItem instanceof JSONObject object) {
+                    Object id = object.get("id");
+                    if (id != null) {
+                        existingById.put(String.valueOf(id), object);
+                    }
+                }
+            }
+
+            for (int i = 0; i < incomingArray.size(); i++) {
+                Object incomingItem = incomingArray.get(i);
+                Object existingItem = i < existingArray.size() ? existingArray.get(i) : null;
+                if (incomingItem instanceof JSONObject incomingObject) {
+                    Object id = incomingObject.get("id");
+                    if (id != null) {
+                        JSONObject matchedExisting = existingById.get(String.valueOf(id));
+                        if (matchedExisting != null) {
+                            existingItem = matchedExisting;
+                        }
+                    }
+                }
+                preserveApiKeyValue(incomingItem, existingItem);
+            }
+        }
+    }
+
+    private boolean isMissingApiKey(Object value) {
+        return value == null || (value instanceof String text && !StringUtils.hasText(text));
     }
 
     private byte[] sha256(String value) {

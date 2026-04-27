@@ -24,6 +24,7 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
 
         nodeDefinitionMap.putIfAbsent("llm", createGenericLlmNodeDefinition());
         nodeDefinitionMap.putIfAbsent("condition", createConditionNodeDefinition());
+        nodeDefinitionMap.putIfAbsent("tts", createTtsNodeDefinition());
         nodeDefinitionMap.putIfAbsent("rag", createRagNodeDefinition());
 
         return nodeDefinitionMap.values().stream()
@@ -40,6 +41,9 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         }
         if ("condition".equals(nodeType)) {
             return createConditionNodeDefinition();
+        }
+        if ("tts".equals(nodeType)) {
+            return createTtsNodeDefinition();
         }
         if ("rag".equals(nodeType)) {
             return createRagNodeDefinition();
@@ -71,6 +75,18 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"conditionResult\":{\"type\":\"boolean\"},\"selectedBranch\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
         nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"leftType\":{\"type\":\"string\",\"default\":\"reference\"},\"leftReference\":{\"type\":\"string\"},\"leftValue\":{\"type\":\"string\"},\"operator\":{\"type\":\"string\",\"default\":\"equals\"},\"rightValue\":{\"type\":\"string\"},\"caseSensitive\":{\"type\":\"boolean\",\"default\":false}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createTtsNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("tts");
+        nodeDefinition.setDisplayName("超拟人音频合成");
+        nodeDefinition.setCategory("TOOL");
+        nodeDefinition.setIcon("🔊");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"audioUrl\":{\"type\":\"string\"},\"fileName\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"},\"chunks\":{\"type\":\"number\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\",\"default\":\"qwen3-tts-flash\"},\"voice\":{\"type\":\"string\",\"default\":\"Cherry\"},\"languageType\":{\"type\":\"string\",\"default\":\"Auto\"}}}");
         return nodeDefinition;
     }
 

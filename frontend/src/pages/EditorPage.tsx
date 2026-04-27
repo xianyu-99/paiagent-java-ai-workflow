@@ -128,7 +128,8 @@ const EditorPage = () => {
     apiKey: '',
     model: 'qwen3-tts-flash',
     voice: 'Cherry',
-    languageType: 'Auto'
+    languageType: 'Auto',
+    apiKeyConfigured: false
   });
   const [ttsInputParams, setTtsInputParams] = useState<TtsInputParam[]>([]);
   const [ttsOutputParams, setTtsOutputParams] = useState<TtsOutputParam[]>([]);
@@ -225,7 +226,8 @@ const EditorPage = () => {
         apiKey: (node.data?.apiKey as string) || '',
         model: (node.data?.model as string) || 'qwen3-tts-flash',
         voice: (node.data?.voice as string) || 'Cherry',
-        languageType: (node.data?.languageType as string) || 'Auto'
+        languageType: (node.data?.languageType as string) || 'Auto',
+        apiKeyConfigured: Boolean(node.data?.apiKeyConfigured || node.data?.apiKey)
       });
       setTtsInputParams((node.data?.inputParams as TtsInputParam[]) || []);
       setTtsOutputParams((node.data?.outputParams as TtsOutputParam[]) || []);
@@ -731,7 +733,7 @@ const EditorPage = () => {
   const handleSaveTtsConfig = () => {
     if (!selectedNode) return;
 
-    if (!ttsConfig.apiKey) {
+    if (!ttsConfig.apiKey && !ttsConfig.apiKeyConfigured) {
       message.warning('请填写 API Key');
       return;
     }
@@ -770,6 +772,7 @@ const EditorPage = () => {
       model: ttsConfig.model,
       voice: ttsConfig.voice,
       languageType: ttsConfig.languageType,
+      apiKeyConfigured: Boolean(ttsConfig.apiKey || ttsConfig.apiKeyConfigured),
       inputParams: ttsInputParams,
       outputParams: ttsOutputParams
     };
@@ -1786,7 +1789,7 @@ const EditorPage = () => {
                       <label className="font-medium text-gray-700 block mb-3">基本信息</label>
                       <Form.Item label="API Key">
                         <Input.Password
-                          placeholder="请输入阿里百炼 API Key"
+                          placeholder={ttsConfig.apiKeyConfigured ? '留空则沿用已保存的 API Key' : '请输入阿里百炼 API Key'}
                           value={ttsConfig.apiKey}
                           onChange={(e) => setTtsConfig({ ...ttsConfig, apiKey: e.target.value })}
                         />

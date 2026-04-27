@@ -27,6 +27,7 @@ import java.util.function.Consumer;
 @Component
 public class TTSNodeExecutor implements NodeExecutor {
     
+    private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
     private static final int MAX_TTS_INPUT_LENGTH = 400;
     private static final int MAX_AUDIO_DOWNLOAD_BYTES = 50 * 1024 * 1024;
     
@@ -49,7 +50,7 @@ public class TTSNodeExecutor implements NodeExecutor {
             throw new IllegalArgumentException("输入文本不能为空");
         }
         
-        Map<String, Object> data = node.getData();
+        Map<String, Object> data = node.getData() == null ? Map.of() : node.getData();
         String apiKey = (String) data.get("apiKey");
         String model = (String) data.getOrDefault("model", "qwen3-tts-flash");
         String voiceStr = (String) data.getOrDefault("voice", "Cherry");
@@ -190,7 +191,7 @@ public class TTSNodeExecutor implements NodeExecutor {
     }
     
     private String extractInputText(WorkflowNode node, Map<String, Object> input) {
-        Map<String, Object> data = node.getData();
+        Map<String, Object> data = node.getData() == null ? Map.of() : node.getData();
         List<Map<String, Object>> inputParams = (List<Map<String, Object>>) data.get("inputParams");
         
         if (inputParams != null && !inputParams.isEmpty()) {
@@ -199,35 +200,59 @@ public class TTSNodeExecutor implements NodeExecutor {
                 if ("text".equals(paramName)) {
                     String type = (String) param.get("type");
                     if ("input".equals(type)) {
-                        return (String) param.get("value");
+                        return stringValue(param.get("value"));
                     } else if ("reference".equals(type)) {
-                        String referenceNode = (String) param.get("referenceNode");
-                        if (StringUtils.hasText(referenceNode)) {
-                            String[] parts = referenceNode.split("\\.");
-                            if (parts.length == 2) {
-                                String paramKey = parts[1];
-                                Object value = input.get(paramKey);
-                                if (value instanceof String) {
-                                    return (String) value;
-                                }
-                            }
+                        Object value = resolveReference(stringValue(param.get("referenceNode")), input);
+                        if (value != null) {
+                            return String.valueOf(value);
                         }
                     }
                 }
             }
         }
         
-        String text = (String) input.get("output");
+        String text = stringValue(input.get("output"));
         if (StringUtils.hasText(text)) {
             return text;
         }
         
-        text = (String) input.get("input");
+        text = stringValue(input.get("input"));
         if (StringUtils.hasText(text)) {
             return text;
         }
         
-        return (String) input.get("text");
+        return stringValue(input.get("text"));
+    }
+
+    private Object resolveReference(String reference, Map<String, Object> input) {
+        if (!StringUtils.hasText(reference)) {
+            return null;
+        }
+        if (!reference.contains(".")) {
+            return input.get(reference);
+        }
+
+        String[] parts = reference.split("\\.");
+        String nodeId = parts[0];
+        String field = parts[parts.length - 1];
+        Object nodeOutputsObject = input.get(NODE_OUTPUTS_CONTEXT_KEY);
+        if (nodeOutputsObject instanceof Map<?, ?> nodeOutputs) {
+            Object nodeOutputObject = nodeOutputs.get(nodeId);
+            if (nodeOutputObject instanceof Map<?, ?> nodeOutput) {
+                Object value = nodeOutput.get(field);
+                if (value != null) {
+                    return value;
+                }
+            }
+        }
+        if ("user_input".equals(field)) {
+            return input.get("input");
+        }
+        return input.get(field);
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
     }
     
     @Override
@@ -376,7 +401,7 @@ public class TTSNodeExecutor implements NodeExecutor {
      */
     private byte[] normalizeWavHeader(byte[] wavData) {
         if (wavData == null || wavData.length < 44) {
-            throw new IllegalArgumentException("鏃犳晥鐨?WAV 鏂囦欢鏍煎紡");
+            throw new IllegalArgumentException("无效的 WAV 文件格式");
         }
 
         byte[] normalized = Arrays.copyOf(wavData, wavData.length);

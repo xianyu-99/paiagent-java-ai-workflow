@@ -41,10 +41,14 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     public WorkflowResponse updateWorkflow(Long id, WorkflowRequest request, Long userId, boolean admin) {
         Workflow workflow = getAccessibleWorkflow(id, userId, admin);
+        String flowData = apiKeyCryptoService.preserveMissingApiKeysInJson(
+                request.getFlowData(),
+                workflow.getFlowData()
+        );
 
         workflow.setName(request.getName());
         workflow.setDescription(request.getDescription());
-        workflow.setFlowData(apiKeyCryptoService.encryptApiKeysInJson(request.getFlowData()));
+        workflow.setFlowData(apiKeyCryptoService.encryptApiKeysInJson(flowData));
         workflow.setEngineType(request.getEngineType());
 
         this.updateById(workflow);
@@ -88,7 +92,8 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     private WorkflowResponse toResponse(Workflow workflow) {
         WorkflowResponse response = new WorkflowResponse();
         BeanUtils.copyProperties(workflow, response);
-        response.setFlowData(apiKeyCryptoService.decryptApiKeysInJson(response.getFlowData()));
+        String decryptedFlowData = apiKeyCryptoService.decryptApiKeysInJson(response.getFlowData());
+        response.setFlowData(apiKeyCryptoService.maskApiKeysInJson(decryptedFlowData));
         return response;
     }
 }
