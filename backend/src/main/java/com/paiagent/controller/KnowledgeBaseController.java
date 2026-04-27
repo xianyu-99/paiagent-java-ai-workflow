@@ -6,6 +6,7 @@ import com.paiagent.common.Result;
 import com.paiagent.dto.KnowledgeBaseRequest;
 import com.paiagent.dto.KnowledgeBaseResponse;
 import com.paiagent.dto.KnowledgeDocumentResponse;
+import com.paiagent.dto.KnowledgeReindexResponse;
 import com.paiagent.dto.KnowledgeUploadRequest;
 import com.paiagent.service.KnowledgeBaseService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -111,6 +112,22 @@ public class KnowledgeBaseController {
     public Result<List<KnowledgeDocumentResponse>> listDocuments(@PathVariable Long id, HttpServletRequest request) {
         try {
             return Result.success(knowledgeBaseService.listDocuments(
+                    id,
+                    AuthContext.getUserId(request),
+                    AuthContext.isAdmin(request)
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (RuntimeException e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "重建知识库向量索引")
+    @PostMapping("/{id}/reindex")
+    public Result<KnowledgeReindexResponse> rebuildEmbeddings(@PathVariable Long id, HttpServletRequest request) {
+        try {
+            return Result.success(knowledgeBaseService.rebuildEmbeddings(
                     id,
                     AuthContext.getUserId(request),
                     AuthContext.isAdmin(request)

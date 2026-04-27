@@ -97,12 +97,16 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     chunk_index INT NOT NULL,
     content MEDIUMTEXT NOT NULL,
     embedding JSON NOT NULL,
+    embedding_provider VARCHAR(50) NULL,
+    embedding_model VARCHAR(100) NULL,
+    embedding_dimension INT NULL,
     token_count INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted TINYINT DEFAULT 0,
     INDEX idx_chunk_kb_id (knowledge_base_id),
-    INDEX idx_chunk_doc_id (document_id)
+    INDEX idx_chunk_doc_id (document_id),
+    INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS llm_global_config (

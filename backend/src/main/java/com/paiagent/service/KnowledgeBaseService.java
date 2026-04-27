@@ -5,6 +5,7 @@ import com.paiagent.common.ForbiddenException;
 import com.paiagent.dto.KnowledgeBaseRequest;
 import com.paiagent.dto.KnowledgeBaseResponse;
 import com.paiagent.dto.KnowledgeDocumentResponse;
+import com.paiagent.dto.KnowledgeReindexResponse;
 import com.paiagent.dto.RetrievedChunk;
 import com.paiagent.entity.KnowledgeBase;
 import com.paiagent.entity.KnowledgeChunk;
@@ -96,6 +97,7 @@ public class KnowledgeBaseService {
         document.setChunkCount(chunks.size());
         knowledgeDocumentMapper.insert(document);
 
+        List<List<Double>> embeddings = textEmbeddingService.embedBatch(chunks);
         for (int i = 0; i < chunks.size(); i++) {
             String chunkText = chunks.get(i);
             KnowledgeChunk chunk = new KnowledgeChunk();
@@ -103,7 +105,8 @@ public class KnowledgeBaseService {
             chunk.setDocumentId(document.getId());
             chunk.setChunkIndex(i);
             chunk.setContent(chunkText);
-            chunk.setEmbedding(textEmbeddingService.serialize(textEmbeddingService.embed(chunkText)));
+            chunk.setEmbedding(textEmbeddingService.serialize(embeddings.get(i)));
+            applyEmbeddingMetadata(chunk);
             chunk.setTokenCount(estimateTokens(chunkText));
             knowledgeChunkMapper.insert(chunk);
         }
@@ -145,6 +148,7 @@ public class KnowledgeBaseService {
         return knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
                         .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId))
                 .stream()
+                .filter(this::isCompatibleEmbedding)
                 .map(chunk -> new RetrievedChunk(
                         chunk.getId(),
                         chunk.getDocumentId(),
@@ -156,6 +160,42 @@ public class KnowledgeBaseService {
                 .sorted(Comparator.comparing(RetrievedChunk::getScore).reversed())
                 .limit(Math.max(1, topK))
                 .toList();
+    }
+
+    @Transactional
+    public KnowledgeReindexResponse rebuildEmbeddings(Long knowledgeBaseId, Long userId, boolean admin) {
+        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        List<KnowledgeChunk> chunks = knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
+                .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
+                .orderByAsc(KnowledgeChunk::getDocumentId)
+                .orderByAsc(KnowledgeChunk::getChunkIndex));
+        if (chunks.isEmpty()) {
+            return new KnowledgeReindexResponse(
+                    knowledgeBaseId,
+                    0,
+                    textEmbeddingService.provider(),
+                    textEmbeddingService.model(),
+                    textEmbeddingService.dimensions()
+            );
+        }
+
+        List<List<Double>> embeddings = textEmbeddingService.embedBatch(chunks.stream()
+                .map(KnowledgeChunk::getContent)
+                .toList());
+        for (int i = 0; i < chunks.size(); i++) {
+            KnowledgeChunk chunk = chunks.get(i);
+            chunk.setEmbedding(textEmbeddingService.serialize(embeddings.get(i)));
+            applyEmbeddingMetadata(chunk);
+            knowledgeChunkMapper.updateById(chunk);
+        }
+
+        return new KnowledgeReindexResponse(
+                knowledgeBaseId,
+                chunks.size(),
+                textEmbeddingService.provider(),
+                textEmbeddingService.model(),
+                textEmbeddingService.dimensions()
+        );
     }
 
     @Transactional
@@ -180,6 +220,20 @@ public class KnowledgeBaseService {
                 chunkCount,
                 knowledgeBase.getCreatedAt(),
                 knowledgeBase.getUpdatedAt()
+        );
+    }
+
+    private void applyEmbeddingMetadata(KnowledgeChunk chunk) {
+        chunk.setEmbeddingProvider(textEmbeddingService.provider());
+        chunk.setEmbeddingModel(textEmbeddingService.model());
+        chunk.setEmbeddingDimension(textEmbeddingService.dimensions());
+    }
+
+    private boolean isCompatibleEmbedding(KnowledgeChunk chunk) {
+        return textEmbeddingService.isCompatible(
+                chunk.getEmbeddingProvider(),
+                chunk.getEmbeddingModel(),
+                chunk.getEmbeddingDimension()
         );
     }
 

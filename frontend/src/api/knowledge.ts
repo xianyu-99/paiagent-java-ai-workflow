@@ -12,6 +12,14 @@ export interface KnowledgeBase {
   updatedAt?: string;
 }
 
+export interface KnowledgeReindexResult {
+  knowledgeBaseId: number;
+  chunkCount: number;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingDimension: number;
+}
+
 export interface KnowledgeDocument {
   id: number;
   knowledgeBaseId: number;
@@ -45,4 +53,10 @@ export const listKnowledgeDocuments = (
   knowledgeBaseId: number
 ): Promise<ApiResult<KnowledgeDocument[]>> => {
   return api.get(`/api/knowledge-bases/${knowledgeBaseId}/documents`);
+};
+
+export const rebuildKnowledgeBaseEmbeddings = (
+  knowledgeBaseId: number
+): Promise<ApiResult<KnowledgeReindexResult>> => {
+  return api.post(`/api/knowledge-bases/${knowledgeBaseId}/reindex`);
 };

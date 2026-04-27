@@ -14,6 +14,8 @@ class TextEmbeddingServiceTest {
         var embedding = textEmbeddingService.embed("Java 大模型 RAG 知识库");
 
         assertEquals(256, embedding.size());
+        assertEquals("local", textEmbeddingService.provider());
+        assertEquals("local-hash-embedding", textEmbeddingService.model());
     }
 
     @Test
@@ -23,5 +25,10 @@ class TextEmbeddingServiceTest {
         var unrelated = textEmbeddingService.embed("今天晚饭吃什么");
 
         assertTrue(textEmbeddingService.cosine(query, similar) > textEmbeddingService.cosine(query, unrelated));
+    }
+
+    @Test
+    void shouldTreatLegacyChunksAsCompatibleWithLocalEmbeddingOnly() {
+        assertTrue(textEmbeddingService.isCompatible(null, null, null));
     }
 }

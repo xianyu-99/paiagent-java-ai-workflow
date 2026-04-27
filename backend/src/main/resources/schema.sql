@@ -108,12 +108,16 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     chunk_index INT NOT NULL COMMENT '文档内切片序号',
     content MEDIUMTEXT NOT NULL COMMENT '切片文本',
     embedding JSON NOT NULL COMMENT '切片向量 JSON',
+    embedding_provider VARCHAR(50) NULL COMMENT 'Embedding provider',
+    embedding_model VARCHAR(100) NULL COMMENT 'Embedding model',
+    embedding_dimension INT NULL COMMENT 'Embedding dimension',
     token_count INT DEFAULT 0 COMMENT '估算 token 数',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
     INDEX idx_chunk_kb_id (knowledge_base_id),
-    INDEX idx_chunk_doc_id (document_id)
+    INDEX idx_chunk_doc_id (document_id),
+    INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表';
 
 -- 插入预置节点定义数据

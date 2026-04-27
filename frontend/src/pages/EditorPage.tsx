@@ -15,6 +15,7 @@ import { createWorkflow, updateWorkflow, getWorkflows, getWorkflow, deleteWorkfl
 import {
   createKnowledgeBase,
   listKnowledgeBases,
+  rebuildKnowledgeBaseEmbeddings,
   uploadKnowledgeDocument,
   KnowledgeBase,
 } from '../api/knowledge';
@@ -151,6 +152,7 @@ const EditorPage = () => {
   const [newKnowledgeBaseDescription, setNewKnowledgeBaseDescription] = useState('');
   const [knowledgeFileName, setKnowledgeFileName] = useState('manual.txt');
   const [knowledgeContent, setKnowledgeContent] = useState('');
+  const [knowledgeReindexing, setKnowledgeReindexing] = useState(false);
 
   // 自动保存定时器
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -903,6 +905,28 @@ const EditorPage = () => {
       await refreshKnowledgeBases();
     } else {
       message.error(response.message || '文档导入失败');
+    }
+  };
+
+  const handleRebuildKnowledgeEmbeddings = async () => {
+    if (!ragConfig.knowledgeBaseId) {
+      message.warning('请先选择知识库');
+      return;
+    }
+    setKnowledgeReindexing(true);
+    try {
+      const response = await rebuildKnowledgeBaseEmbeddings(ragConfig.knowledgeBaseId);
+      if (response.code === 200) {
+        const result = response.data;
+        message.success(
+          `向量索引重建完成：${result.chunkCount} 个切片，${result.embeddingProvider}/${result.embeddingModel}`
+        );
+        await refreshKnowledgeBases();
+      } else {
+        message.error(response.message || '向量索引重建失败');
+      }
+    } finally {
+      setKnowledgeReindexing(false);
     }
   };
 
@@ -1895,6 +1919,14 @@ const EditorPage = () => {
                       />
                       <Button className="mt-2" block onClick={handleUploadKnowledgeDocument}>
                         上传并切片
+                      </Button>
+                      <Button
+                        className="mt-2"
+                        block
+                        loading={knowledgeReindexing}
+                        onClick={handleRebuildKnowledgeEmbeddings}
+                      >
+                        重建向量索引
                       </Button>
                     </div>
 

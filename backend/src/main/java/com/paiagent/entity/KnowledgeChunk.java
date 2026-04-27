@@ -27,6 +27,12 @@ public class KnowledgeChunk {
 
     private String embedding;
 
+    private String embeddingProvider;
+
+    private String embeddingModel;
+
+    private Integer embeddingDimension;
+
     private Integer tokenCount;
 
     @TableField(fill = FieldFill.INSERT)

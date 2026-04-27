@@ -21,6 +21,7 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         createKnowledgeBaseTable();
         createKnowledgeDocumentTable();
         createKnowledgeChunkTable();
+        migrateKnowledgeChunkEmbeddingMetadata();
         upsertRagNodeDefinition();
     }
 
@@ -76,6 +77,43 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     INDEX idx_chunk_doc_id (document_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表'
                 """);
+    }
+
+    private void migrateKnowledgeChunkEmbeddingMetadata() {
+        addColumnIfMissing("knowledge_chunk", "embedding_provider",
+                "ALTER TABLE knowledge_chunk ADD COLUMN embedding_provider VARCHAR(50) NULL AFTER embedding");
+        addColumnIfMissing("knowledge_chunk", "embedding_model",
+                "ALTER TABLE knowledge_chunk ADD COLUMN embedding_model VARCHAR(100) NULL AFTER embedding_provider");
+        addColumnIfMissing("knowledge_chunk", "embedding_dimension",
+                "ALTER TABLE knowledge_chunk ADD COLUMN embedding_dimension INT NULL AFTER embedding_model");
+        addIndexIfMissing("knowledge_chunk", "idx_chunk_embedding_meta",
+                "ALTER TABLE knowledge_chunk ADD INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)");
+    }
+
+    private void addColumnIfMissing(String tableName, String columnName, String ddl) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND COLUMN_NAME = ?
+                """, Integer.class, tableName, columnName);
+        if (count == null || count == 0) {
+            jdbcTemplate.execute(ddl);
+        }
+    }
+
+    private void addIndexIfMissing(String tableName, String indexName, String ddl) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND INDEX_NAME = ?
+                """, Integer.class, tableName, indexName);
+        if (count == null || count == 0) {
+            jdbcTemplate.execute(ddl);
+        }
     }
 
     private void upsertRagNodeDefinition() {
