@@ -50,30 +50,37 @@ public class NodeAdapter {
                 // 从状态中提取当前输入
                 Map<String, Object> stateData = state.data();
                 @SuppressWarnings("unchecked")
-                Map<String, Object> currentInput = (Map<String, Object>) stateData.getOrDefault("currentInput", new HashMap<>());
+                Map<String, Object> stateCurrentInput = (Map<String, Object>) stateData.getOrDefault("currentInput", new HashMap<>());
+                Map<String, Object> currentInput = new HashMap<>(stateCurrentInput);
                 
-                // 为 Output 节点注入 nodeOutputs 以便访问所有节点的输出
-                if ("output".equals(node.getType())) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Map<String, Object>> nodeOutputs = 
-                        (Map<String, Map<String, Object>>) stateData.getOrDefault("nodeOutputs", new HashMap<>());
-                    currentInput = new HashMap<>(currentInput);
-                    currentInput.put("__nodeOutputs__", nodeOutputs);
-                }
+                @SuppressWarnings("unchecked")
+                Map<String, Map<String, Object>> stateNodeOutputs =
+                    (Map<String, Map<String, Object>>) stateData.getOrDefault("nodeOutputs", new HashMap<>());
+                Map<String, Map<String, Object>> nodeOutputs = new HashMap<>(stateNodeOutputs);
+
+                @SuppressWarnings("unchecked")
+                Map<String, Integer> stateNodeExecutionCounts =
+                    (Map<String, Integer>) stateData.getOrDefault("nodeExecutionCounts", new HashMap<>());
+                Map<String, Integer> nodeExecutionCounts = new HashMap<>(stateNodeExecutionCounts);
+                int executionCount = nodeExecutionCounts.getOrDefault(node.getId(), 0) + 1;
+
+                currentInput.put("__nodeOutputs__", nodeOutputs);
+                currentInput.put("__nodeExecutionCount__", executionCount);
+                currentInput.put("executionCount", executionCount);
+                currentInput.put("loopIteration", executionCount);
                 
                 // 执行节点，复用统一的超时和重试策略
                 NodeExecutionOutcome outcome = nodeExecutionRunner.execute(node, currentInput, eventCallback);
-                Map<String, Object> output = outcome.getOutput();
+                Map<String, Object> output = removeInternalContext(outcome.getOutput());
                 
                 // 更新状态
                 Map<String, Object> newStateData = new HashMap<>(stateData);
                 
                 // 保存节点输出
-                @SuppressWarnings("unchecked")
-                Map<String, Map<String, Object>> nodeOutputs = 
-                    (Map<String, Map<String, Object>>) newStateData.getOrDefault("nodeOutputs", new HashMap<>());
                 nodeOutputs.put(node.getId(), output);
                 newStateData.put("nodeOutputs", nodeOutputs);
+                nodeExecutionCounts.put(node.getId(), executionCount);
+                newStateData.put("nodeExecutionCounts", nodeExecutionCounts);
                 
                 // 更新当前输入为本节点输出（传递给下一个节点）
                 newStateData.put("currentInput", output);
@@ -83,7 +90,7 @@ public class NodeAdapter {
                 if (eventCallback != null) {
                     long duration = System.currentTimeMillis() - startTime;
                     Map<String, Object> eventData = new HashMap<>();
-                    eventData.put("input", currentInput);
+                    eventData.put("input", removeInternalContext(currentInput));
                     eventData.put("output", output);
                     eventData.put("duration", duration);
                     eventData.put("attempts", outcome.getAttempts().size());
@@ -110,6 +117,16 @@ public class NodeAdapter {
                 return CompletableFuture.completedFuture(errorState);
             }
         };
+    }
+
+    private Map<String, Object> removeInternalContext(Map<String, Object> data) {
+        Map<String, Object> cleanData = new HashMap<>();
+        if (data != null) {
+            cleanData.putAll(data);
+        }
+        cleanData.remove("__nodeOutputs__");
+        cleanData.remove("__nodeExecutionCount__");
+        return cleanData;
     }
     
     /**

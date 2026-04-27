@@ -1640,7 +1640,7 @@ const EditorPage = () => {
                           onChange={(value) => setConditionConfig({ ...conditionConfig, leftReference: value })}
                           style={{ width: '100%' }}
                         >
-                          {getReferenceableParams().map((p) => (
+                          {[{ label: '运行时.loopIteration', value: 'loopIteration' }, ...getReferenceableParams()].map((p) => (
                             <Select.Option key={p.value} value={p.value}>
                               {p.label}
                             </Select.Option>

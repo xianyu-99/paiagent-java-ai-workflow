@@ -19,7 +19,7 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 - 大模型应用开发练习与面试展示
 - Java 后端 AI Agent / Workflow 项目复现
 - LLM、TTS、对象存储、SSE 调试的工程化整合
-- 已支持 DAG 条件分支，后续可扩展 RAG、分类器、Agent 状态流等能力
+- 已支持 DAG / LangGraph 条件分支，后续可扩展 RAG、分类器、Agent 状态流等能力
 
 ## 核心功能
 
@@ -47,7 +47,14 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 - 支持引用上游节点输出或填写固定值作为判断左值
 - 支持等于、不等于、包含、不包含、为空、大于、小于等常用判断条件
 - 条件成立时执行 true 出口，条件不成立时执行 false 出口
-- 未命中的分支会在 DAG 执行时跳过，不会误触发下游节点
+- DAG 引擎会跳过未命中分支，LangGraph 引擎会通过 conditional edge 路由到命中分支
+
+### LangGraph4j 状态图引擎
+
+- 支持将可视化工作流转换为 LangGraph4j `StateGraph`
+- 支持 `condition` 节点通过 conditional edge 执行 true / false 分支
+- 支持循环边，适合表达“执行节点 -> 判断条件 -> 未满足则回到前置节点”的状态流
+- 内置最大迭代次数保护，避免错误工作流导致无限循环
 
 ### LLM 多模型接入
 
@@ -102,7 +109,7 @@ TTS 节点已经实现完整链路：
 | --- | --- |
 | 后端 | Java 21、Spring Boot 3.4.1、MyBatis-Plus、Spring Security Crypto |
 | AI 调用 | Spring AI、OpenAI Compatible API、DashScope / Qwen、Zhipu GLM |
-| 工作流 | 自研 DAG 引擎、LangGraph4j 基础适配 |
+| 工作流 | 自研 DAG 引擎、LangGraph4j 状态图引擎 |
 | 数据库 | MySQL |
 | 缓存 | Redis |
 | 文件存储 | MinIO |
@@ -278,23 +285,24 @@ http://你的局域网IP:5173
 - 增加 API Key AES/GCM 加密存储和启动迁移
 - 增加执行可靠性基础版：运行中状态记录、节点超时、失败重试、错误日志、重试事件推送
 - 增加 DAG if/else 条件分支节点：支持 true / false 出口、上游参数引用和动态分支执行
+- 跑通 LangGraph4j conditional edge 条件分支和基础循环执行，并补充自动化测试
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
 
 ## 当前边界
 
-- DAG 引擎是当前主要可运行路径
-- LangGraph4j 已有基础适配代码，但 LangGraph 条件分支、循环和复杂 Agent 状态流仍属于后续增强方向
+- DAG 引擎是当前主要稳定路径，适合常规工作流执行
+- LangGraph4j 已支持条件分支和基础循环，但复杂 Agent 状态流、人工中断、检查点恢复仍属于后续增强方向
 - RAG 知识库节点暂未实现
 - 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 
 ## 简历描述参考
 
-> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
+> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 LangGraph4j 状态图引擎，支持 conditional edge 条件路由和基础循环状态流；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
 
 ## 后续规划
 
-- 跑通 LangGraph4j 条件分支和循环执行
 - 增加分类器节点和更复杂的多分支路由节点
+- 增强 LangGraph4j Agent 状态流、检查点恢复和人工中断
 - 增加 RAG 知识库节点：文件上传、切片、Embedding、向量检索、LLM 回答
 - 增加执行中断、工作流版本发布和执行快照
 - 增加更多模型供应商和统一模型健康检查

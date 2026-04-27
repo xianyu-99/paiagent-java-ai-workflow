@@ -105,6 +105,32 @@ class LangGraphWorkflowEngineTest {
         System.out.println("   收到事件数: " + events.size());
         System.out.println("   事件列表: " + events);
     }
+
+    @Test
+    void testConditionBranchExecution() {
+        Workflow workflow = createConditionWorkflow();
+
+        ExecutionResponse trueResponse = langGraphEngine.execute(workflow, "please go true branch");
+        assertNotNull(trueResponse);
+        assertEquals("SUCCESS", trueResponse.getStatus());
+        assertTrue(trueResponse.getOutputData().contains("TRUE_BRANCH"));
+
+        ExecutionResponse falseResponse = langGraphEngine.execute(workflow, "stop here");
+        assertNotNull(falseResponse);
+        assertEquals("SUCCESS", falseResponse.getStatus());
+        assertTrue(falseResponse.getOutputData().contains("FALSE_BRANCH"));
+    }
+
+    @Test
+    void testConditionLoopExecution() {
+        Workflow workflow = createLoopWorkflow();
+
+        ExecutionResponse response = langGraphEngine.execute(workflow, "loop test");
+
+        assertNotNull(response);
+        assertEquals("SUCCESS", response.getStatus());
+        assertTrue(response.getOutputData().contains("LOOP_DONE"));
+    }
     
     /**
      * 创建简单工作流：Input -> Output
@@ -202,5 +228,98 @@ class LangGraphWorkflowEngineTest {
         workflow.setFlowData(JSON.toJSONString(config));
         
         return workflow;
+    }
+
+    private Workflow createConditionWorkflow() {
+        Workflow workflow = new Workflow();
+        workflow.setId(3L);
+        workflow.setName("LangGraph 条件分支测试工作流");
+
+        List<WorkflowNode> nodes = new ArrayList<>();
+        nodes.add(node("input-1", "input", Map.of("label", "输入", "type", "input")));
+
+        Map<String, Object> conditionData = new HashMap<>();
+        conditionData.put("label", "条件");
+        conditionData.put("type", "condition");
+        conditionData.put("leftType", "reference");
+        conditionData.put("leftReference", "input-1.user_input");
+        conditionData.put("operator", "contains");
+        conditionData.put("rightValue", "go");
+        conditionData.put("caseSensitive", false);
+        nodes.add(node("condition-1", "condition", conditionData));
+
+        nodes.add(node("output-true", "output", outputData("TRUE_BRANCH")));
+        nodes.add(node("output-false", "output", outputData("FALSE_BRANCH")));
+
+        WorkflowConfig config = new WorkflowConfig();
+        config.setNodes(nodes);
+        config.setEdges(List.of(
+                edge("edge-1", "input-1", "condition-1", null),
+                edge("edge-2", "condition-1", "output-true", "true"),
+                edge("edge-3", "condition-1", "output-false", "false")
+        ));
+
+        workflow.setFlowData(JSON.toJSONString(config));
+        return workflow;
+    }
+
+    private Workflow createLoopWorkflow() {
+        Workflow workflow = new Workflow();
+        workflow.setId(4L);
+        workflow.setName("LangGraph 循环测试工作流");
+
+        List<WorkflowNode> nodes = new ArrayList<>();
+        nodes.add(node("input-1", "input", Map.of("label", "输入", "type", "input")));
+
+        Map<String, Object> conditionData = new HashMap<>();
+        conditionData.put("label", "循环条件");
+        conditionData.put("type", "condition");
+        conditionData.put("leftType", "reference");
+        conditionData.put("leftReference", "loopIteration");
+        conditionData.put("operator", "lt");
+        conditionData.put("rightValue", "3");
+        conditionData.put("caseSensitive", false);
+        nodes.add(node("condition-1", "condition", conditionData));
+
+        nodes.add(node("loop-output", "output", outputData("LOOP_AGAIN")));
+        nodes.add(node("final-output", "output", outputData("LOOP_DONE")));
+
+        WorkflowConfig config = new WorkflowConfig();
+        config.setNodes(nodes);
+        config.setEdges(List.of(
+                edge("edge-1", "input-1", "condition-1", null),
+                edge("edge-2", "condition-1", "loop-output", "true"),
+                edge("edge-3", "loop-output", "condition-1", null),
+                edge("edge-4", "condition-1", "final-output", "false")
+        ));
+
+        workflow.setFlowData(JSON.toJSONString(config));
+        return workflow;
+    }
+
+    private WorkflowNode node(String id, String type, Map<String, Object> data) {
+        WorkflowNode node = new WorkflowNode();
+        node.setId(id);
+        node.setType(type);
+        node.setData(data);
+        return node;
+    }
+
+    private Map<String, Object> outputData(String responseContent) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("label", responseContent);
+        data.put("type", "output");
+        data.put("outputParams", new ArrayList<>());
+        data.put("responseContent", responseContent);
+        return data;
+    }
+
+    private WorkflowEdge edge(String id, String source, String target, String sourceHandle) {
+        WorkflowEdge edge = new WorkflowEdge();
+        edge.setId(id);
+        edge.setSource(source);
+        edge.setTarget(target);
+        edge.setSourceHandle(sourceHandle);
+        return edge;
     }
 }
