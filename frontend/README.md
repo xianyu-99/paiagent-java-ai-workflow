@@ -1,85 +1,56 @@
 # PaiAgent Frontend
 
-AI Agent 流图执行面板前端项目
+React + Vite 前端，提供登录、工作流可视化编辑、调试执行、全局 LLM 配置、知识库管理和 RAG 文档导入界面。
 
 ## 技术栈
 
 - React 18
 - TypeScript
 - Vite
-- ReactFlow (流程图编辑器)
-- Ant Design (UI 组件库)
-- Tailwind CSS (样式框架)
-- Zustand (状态管理)
-- Axios (HTTP 客户端)
-- React Router (路由管理)
+- ReactFlow
+- Ant Design
+- Tailwind CSS
+- Zustand
+- Axios
 
-## 快速开始
+## 本地启动
 
-### 1. 安装依赖
+1. 安装依赖：
 
-```bash
+```powershell
 npm install
 ```
 
-### 2. 启动开发服务器
+2. 配置后端地址：
 
-```bash
-cp .env.example .env.local
+```powershell
+Copy-Item .env.example .env.local
+```
+
+默认 API 地址：
+
+```properties
+VITE_API_BASE_URL=http://localhost:8084
+```
+
+3. 启动开发服务器：
+
+```powershell
 npm run dev
 ```
 
-应用将在 http://localhost:5173 启动
+访问地址：`http://localhost:5173`
 
-默认会连接 `http://localhost:8084` 后端。如果后端地址有变化，修改 `frontend/.env.local`：
+默认开发账号：`admin / admin123`
 
-```bash
-VITE_API_BASE_URL=http://localhost:8084
-```
+## 主要页面
 
-### 3. 构建生产版本
+- `/login`：登录。
+- `/editor`：工作流编辑器。
+- `/knowledge`：知识库管理，支持粘贴文本和本地文件导入，并显示异步导入进度。
 
-```bash
+## 构建
+
+```powershell
 npm run build
 ```
-
-## 项目结构
-
-```
-src/
-├── api/              # API 接口
-├── pages/            # 页面组件
-├── components/       # 可复用组件
-├── store/            # 状态管理
-├── utils/            # 工具函数
-├── App.tsx           # 根组件
-└── main.tsx          # 入口文件
-```
-
-## 功能特性
-
-### 已完成
-- ✅ 用户登录/登出
-- ✅ 路由守卫
-- ✅ 认证状态管理
-- ✅ API 请求封装
-
-### 开发中
-- 🚧 工作流编辑器
-- 🚧 节点面板
-- 🚧 画布区域
-- 🚧 调试抽屉
-- 🚧 节点配置面板
-
-## 环境变量
-
-后端 API 地址通过 Vite 环境变量配置，示例见 `.env.example`：
-
-```bash
-VITE_API_BASE_URL=http://localhost:8084
-```
-
-## 默认账户
-
-- 用户名: admin
-- 密码: 123

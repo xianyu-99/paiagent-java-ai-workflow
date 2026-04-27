@@ -3,6 +3,8 @@
 # IDE
 .idea/
 .vscode/
+.qoder/
+backend/.qoder/
 *.iml
 *.iws
 *.ipr

@@ -198,7 +198,7 @@ public class ConfigValidationRunner implements ApplicationRunner {
             log.error("   数据库地址: {}", datasourceUrl);
             log.error("   数据库用户: {}", datasourceUsername);
             log.error("   请设置 MYSQL_PASSWORD 后重新启动，例如：");
-            log.error("   MYSQL_PASSWORD=你的数据库密码 ./mvnw spring-boot:run");
+            log.error("   MYSQL_PASSWORD=你的数据库密码 mvn spring-boot:run");
             log.error("==========================================");
             throw new IllegalStateException("MYSQL_PASSWORD is required for the current database", ex);
         }
