@@ -1,0 +1,101 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: paiagent-mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: paiagent
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - paiagent_mysql_data:/var/lib/mysql
+      - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.0
+    container_name: paiagent-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-123456}"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - paiagent_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD:-123456} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: quay.io/minio/minio
+    container_name: paiagent-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - paiagent_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: paiagent-backend
+    environment:
+      SERVER_PORT: 8084
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: paiagent
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-123456}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_PUBLIC_URL: ${MINIO_PUBLIC_URL:-http://localhost:9000}
+      JWT_SECRET: ${JWT_SECRET:-paiagent_compose_jwt_secret_change_me_minimum_32_chars}
+      API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:-paiagent_compose_api_key_crypto_secret_change_me_32_chars}
+      APP_AUTH_DEFAULT_USERNAME: ${APP_AUTH_DEFAULT_USERNAME:-admin}
+      APP_AUTH_DEFAULT_PASSWORD: ${APP_AUTH_DEFAULT_PASSWORD:-admin123}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-placeholder}
+    ports:
+      - "${BACKEND_PORT:-8085}:8084"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    container_name: paiagent-frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - backend
+
+volumes:
+  paiagent_mysql_data:
+  paiagent_redis_data:
+  paiagent_minio_data:
