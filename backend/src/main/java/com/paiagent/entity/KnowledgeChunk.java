@@ -25,6 +25,18 @@ public class KnowledgeChunk {
 
     private String content;
 
+    private String sourceName;
+
+    private String contentType;
+
+    private String sectionTitle;
+
+    private Integer pageNumber;
+
+    private Integer startOffset;
+
+    private Integer endOffset;
+
     private String embedding;
 
     private String embeddingProvider;

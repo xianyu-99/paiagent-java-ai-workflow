@@ -17,6 +17,10 @@ public class KnowledgeDocumentResponse {
 
     private String fileName;
 
+    private String contentType;
+
+    private String parserType;
+
     private Integer chunkCount;
 
     private LocalDateTime createdAt;

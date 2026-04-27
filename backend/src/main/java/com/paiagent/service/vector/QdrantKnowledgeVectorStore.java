@@ -154,6 +154,12 @@ public class QdrantKnowledgeVectorStore implements KnowledgeVectorStore {
         payload.put("knowledgeBaseId", chunk.getKnowledgeBaseId());
         payload.put("documentId", chunk.getDocumentId());
         payload.put("chunkIndex", chunk.getChunkIndex());
+        payload.put("sourceName", chunk.getSourceName());
+        payload.put("contentType", chunk.getContentType());
+        payload.put("sectionTitle", chunk.getSectionTitle());
+        payload.put("pageNumber", chunk.getPageNumber());
+        payload.put("startOffset", chunk.getStartOffset());
+        payload.put("endOffset", chunk.getEndOffset());
         payload.put("embeddingProvider", chunk.getEmbeddingProvider());
         payload.put("embeddingModel", chunk.getEmbeddingModel());
         payload.put("embeddingDimension", chunk.getEmbeddingDimension());

@@ -5,6 +5,7 @@ import com.paiagent.common.ForbiddenException;
 import com.paiagent.common.Result;
 import com.paiagent.dto.KnowledgeBaseRequest;
 import com.paiagent.dto.KnowledgeBaseResponse;
+import com.paiagent.dto.KnowledgeChunkResponse;
 import com.paiagent.dto.KnowledgeDocumentResponse;
 import com.paiagent.dto.KnowledgeReindexResponse;
 import com.paiagent.dto.KnowledgeUploadRequest;
@@ -23,7 +24,6 @@ import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 @Tag(name = "RAG 知识库接口")
@@ -92,17 +92,36 @@ public class KnowledgeBaseController {
                                                         @RequestPart("file") MultipartFile file,
                                                         HttpServletRequest request) {
         try {
-            String content = new String(file.getBytes(), StandardCharsets.UTF_8);
-            return Result.success(knowledgeBaseService.uploadTextDocument(
+            return Result.success(knowledgeBaseService.uploadFileDocument(
                     id,
                     file.getOriginalFilename(),
-                    content,
+                    file.getContentType(),
+                    file.getBytes(),
                     AuthContext.getUserId(request),
                     AuthContext.isAdmin(request)
             ));
         } catch (ForbiddenException e) {
             return Result.forbidden(e.getMessage());
         } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "查询知识库文档切片")
+    @GetMapping("/{id}/documents/{documentId}/chunks")
+    public Result<List<KnowledgeChunkResponse>> listChunks(@PathVariable Long id,
+                                                           @PathVariable Long documentId,
+                                                           HttpServletRequest request) {
+        try {
+            return Result.success(knowledgeBaseService.listChunks(
+                    id,
+                    documentId,
+                    AuthContext.getUserId(request),
+                    AuthContext.isAdmin(request)
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (RuntimeException e) {
             return Result.error(e.getMessage());
         }
     }

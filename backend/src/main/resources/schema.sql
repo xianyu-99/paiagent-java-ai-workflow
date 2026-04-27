@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS knowledge_document (
     knowledge_base_id BIGINT NOT NULL COMMENT '知识库 ID',
     owner_id BIGINT NULL COMMENT '上传用户 ID',
     file_name VARCHAR(255) NOT NULL COMMENT '文件名',
+    content_type VARCHAR(150) NULL COMMENT '文档 MIME 类型',
+    parser_type VARCHAR(50) NULL COMMENT '解析器类型',
     content_hash VARCHAR(64) NOT NULL COMMENT '文档内容 SHA-256',
     chunk_count INT DEFAULT 0 COMMENT '切片数量',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -107,6 +109,12 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     document_id BIGINT NOT NULL COMMENT '文档 ID',
     chunk_index INT NOT NULL COMMENT '文档内切片序号',
     content MEDIUMTEXT NOT NULL COMMENT '切片文本',
+    source_name VARCHAR(255) NULL COMMENT '来源文件名',
+    content_type VARCHAR(150) NULL COMMENT '来源 MIME 类型',
+    section_title VARCHAR(500) NULL COMMENT '章节标题',
+    page_number INT NULL COMMENT 'PDF 页码',
+    start_offset INT NULL COMMENT '原文起始偏移',
+    end_offset INT NULL COMMENT '原文结束偏移',
     embedding JSON NOT NULL COMMENT '切片向量 JSON',
     embedding_provider VARCHAR(50) NULL COMMENT 'Embedding provider',
     embedding_model VARCHAR(100) NULL COMMENT 'Embedding model',
@@ -117,6 +125,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
     INDEX idx_chunk_kb_id (knowledge_base_id),
     INDEX idx_chunk_doc_id (document_id),
+    INDEX idx_chunk_doc_page (document_id, page_number, chunk_index),
     INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表';
 

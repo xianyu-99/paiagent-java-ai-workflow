@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.paiagent.common.ForbiddenException;
 import com.paiagent.dto.KnowledgeBaseRequest;
 import com.paiagent.dto.KnowledgeBaseResponse;
+import com.paiagent.dto.KnowledgeChunkResponse;
 import com.paiagent.dto.KnowledgeDocumentResponse;
 import com.paiagent.dto.KnowledgeReindexResponse;
 import com.paiagent.dto.RetrievedChunk;
@@ -13,6 +14,9 @@ import com.paiagent.entity.KnowledgeDocument;
 import com.paiagent.mapper.KnowledgeBaseMapper;
 import com.paiagent.mapper.KnowledgeChunkMapper;
 import com.paiagent.mapper.KnowledgeDocumentMapper;
+import com.paiagent.service.document.DocumentParsingService;
+import com.paiagent.service.document.ParsedDocument;
+import com.paiagent.service.document.ParsedSegment;
 import com.paiagent.service.vector.KnowledgeVectorStoreService;
 import com.paiagent.service.vector.VectorSearchHit;
 import org.springframework.stereotype.Service;
@@ -43,16 +47,20 @@ public class KnowledgeBaseService {
 
     private final KnowledgeVectorStoreService knowledgeVectorStoreService;
 
+    private final DocumentParsingService documentParsingService;
+
     public KnowledgeBaseService(KnowledgeBaseMapper knowledgeBaseMapper,
                                 KnowledgeDocumentMapper knowledgeDocumentMapper,
                                 KnowledgeChunkMapper knowledgeChunkMapper,
                                 TextEmbeddingService textEmbeddingService,
-                                KnowledgeVectorStoreService knowledgeVectorStoreService) {
+                                KnowledgeVectorStoreService knowledgeVectorStoreService,
+                                DocumentParsingService documentParsingService) {
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.knowledgeDocumentMapper = knowledgeDocumentMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
         this.textEmbeddingService = textEmbeddingService;
         this.knowledgeVectorStoreService = knowledgeVectorStoreService;
+        this.documentParsingService = documentParsingService;
     }
 
     public List<KnowledgeBaseResponse> listKnowledgeBases(Long userId, boolean admin) {
@@ -96,40 +104,25 @@ public class KnowledgeBaseService {
         if (!StringUtils.hasText(content)) {
             throw new IllegalArgumentException("文档内容不能为空");
         }
+        return saveParsedDocument(knowledgeBaseId, documentParsingService.parseText(fileName, content), userId);
+    }
 
-        List<String> chunks = splitText(content);
-        KnowledgeDocument document = new KnowledgeDocument();
-        document.setKnowledgeBaseId(knowledgeBaseId);
-        document.setOwnerId(userId);
-        document.setFileName(StringUtils.hasText(fileName) ? fileName.trim() : "untitled.txt");
-        document.setContentHash(textEmbeddingService.sha256(content));
-        document.setChunkCount(chunks.size());
-        knowledgeDocumentMapper.insert(document);
-
-        List<List<Double>> embeddings = textEmbeddingService.embedBatch(chunks);
-        List<KnowledgeChunk> insertedChunks = new ArrayList<>();
-        for (int i = 0; i < chunks.size(); i++) {
-            String chunkText = chunks.get(i);
-            KnowledgeChunk chunk = new KnowledgeChunk();
-            chunk.setKnowledgeBaseId(knowledgeBaseId);
-            chunk.setDocumentId(document.getId());
-            chunk.setChunkIndex(i);
-            chunk.setContent(chunkText);
-            chunk.setEmbedding(textEmbeddingService.serialize(embeddings.get(i)));
-            applyEmbeddingMetadata(chunk);
-            chunk.setTokenCount(estimateTokens(chunkText));
-            knowledgeChunkMapper.insert(chunk);
-            insertedChunks.add(chunk);
+    @Transactional
+    public KnowledgeDocumentResponse uploadFileDocument(Long knowledgeBaseId,
+                                                        String fileName,
+                                                        String contentType,
+                                                        byte[] bytes,
+                                                        Long userId,
+                                                        boolean admin) {
+        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("文档内容不能为空");
         }
-        knowledgeVectorStoreService.upsert(insertedChunks);
-
-        return new KnowledgeDocumentResponse(
-                document.getId(),
-                document.getKnowledgeBaseId(),
-                document.getFileName(),
-                document.getChunkCount(),
-                document.getCreatedAt()
-        );
+        ParsedDocument parsedDocument = documentParsingService.parseFile(fileName, contentType, bytes);
+        if (!StringUtils.hasText(parsedDocument.rawText())) {
+            throw new IllegalArgumentException("文档解析后没有可导入文本");
+        }
+        return saveParsedDocument(knowledgeBaseId, parsedDocument, userId);
     }
 
     public List<KnowledgeDocumentResponse> listDocuments(Long knowledgeBaseId, Long userId, boolean admin) {
@@ -138,13 +131,21 @@ public class KnowledgeBaseService {
                         .eq(KnowledgeDocument::getKnowledgeBaseId, knowledgeBaseId)
                         .orderByDesc(KnowledgeDocument::getCreatedAt))
                 .stream()
-                .map(document -> new KnowledgeDocumentResponse(
-                        document.getId(),
-                        document.getKnowledgeBaseId(),
-                        document.getFileName(),
-                        document.getChunkCount(),
-                        document.getCreatedAt()
-                ))
+                .map(this::toDocumentResponse)
+                .toList();
+    }
+
+    public List<KnowledgeChunkResponse> listChunks(Long knowledgeBaseId,
+                                                   Long documentId,
+                                                   Long userId,
+                                                   boolean admin) {
+        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        return knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
+                        .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
+                        .eq(KnowledgeChunk::getDocumentId, documentId)
+                        .orderByAsc(KnowledgeChunk::getChunkIndex))
+                .stream()
+                .map(this::toChunkResponse)
                 .toList();
     }
 
@@ -237,6 +238,52 @@ public class KnowledgeBaseService {
         knowledgeBaseMapper.deleteById(id);
     }
 
+    private KnowledgeDocumentResponse saveParsedDocument(Long knowledgeBaseId,
+                                                         ParsedDocument parsedDocument,
+                                                         Long userId) {
+        List<ChunkDraft> chunks = splitParsedDocument(parsedDocument);
+        if (chunks.isEmpty()) {
+            throw new IllegalArgumentException("文档解析后没有可导入文本");
+        }
+
+        KnowledgeDocument document = new KnowledgeDocument();
+        document.setKnowledgeBaseId(knowledgeBaseId);
+        document.setOwnerId(userId);
+        document.setFileName(parsedDocument.fileName());
+        document.setContentType(parsedDocument.contentType());
+        document.setParserType(parsedDocument.parserType());
+        document.setContentHash(textEmbeddingService.sha256(parsedDocument.rawText()));
+        document.setChunkCount(chunks.size());
+        knowledgeDocumentMapper.insert(document);
+
+        List<List<Double>> embeddings = textEmbeddingService.embedBatch(chunks.stream()
+                .map(ChunkDraft::content)
+                .toList());
+        List<KnowledgeChunk> insertedChunks = new ArrayList<>();
+        for (int i = 0; i < chunks.size(); i++) {
+            ChunkDraft draft = chunks.get(i);
+            KnowledgeChunk chunk = new KnowledgeChunk();
+            chunk.setKnowledgeBaseId(knowledgeBaseId);
+            chunk.setDocumentId(document.getId());
+            chunk.setChunkIndex(i);
+            chunk.setContent(draft.content());
+            chunk.setSourceName(draft.sourceName());
+            chunk.setContentType(draft.contentType());
+            chunk.setSectionTitle(draft.sectionTitle());
+            chunk.setPageNumber(draft.pageNumber());
+            chunk.setStartOffset(draft.startOffset());
+            chunk.setEndOffset(draft.endOffset());
+            chunk.setEmbedding(textEmbeddingService.serialize(embeddings.get(i)));
+            applyEmbeddingMetadata(chunk);
+            chunk.setTokenCount(estimateTokens(draft.content()));
+            knowledgeChunkMapper.insert(chunk);
+            insertedChunks.add(chunk);
+        }
+        knowledgeVectorStoreService.upsert(insertedChunks);
+
+        return toDocumentResponse(document);
+    }
+
     private KnowledgeBaseResponse toResponse(KnowledgeBase knowledgeBase) {
         Long documentCount = knowledgeDocumentMapper.selectCount(new LambdaQueryWrapper<KnowledgeDocument>()
                 .eq(KnowledgeDocument::getKnowledgeBaseId, knowledgeBase.getId()));
@@ -254,6 +301,35 @@ public class KnowledgeBaseService {
         );
     }
 
+    private KnowledgeDocumentResponse toDocumentResponse(KnowledgeDocument document) {
+        return new KnowledgeDocumentResponse(
+                document.getId(),
+                document.getKnowledgeBaseId(),
+                document.getFileName(),
+                document.getContentType(),
+                document.getParserType(),
+                document.getChunkCount(),
+                document.getCreatedAt()
+        );
+    }
+
+    private KnowledgeChunkResponse toChunkResponse(KnowledgeChunk chunk) {
+        return new KnowledgeChunkResponse(
+                chunk.getId(),
+                chunk.getDocumentId(),
+                chunk.getChunkIndex(),
+                chunk.getContent(),
+                chunk.getSourceName(),
+                chunk.getContentType(),
+                chunk.getSectionTitle(),
+                chunk.getPageNumber(),
+                chunk.getStartOffset(),
+                chunk.getEndOffset(),
+                chunk.getTokenCount(),
+                chunk.getCreatedAt()
+        );
+    }
+
     private void applyEmbeddingMetadata(KnowledgeChunk chunk) {
         chunk.setEmbeddingProvider(textEmbeddingService.provider());
         chunk.setEmbeddingModel(textEmbeddingService.model());
@@ -268,9 +344,30 @@ public class KnowledgeBaseService {
         );
     }
 
-    private List<String> splitText(String content) {
-        String normalized = content.replace("\r\n", "\n").trim();
-        List<String> chunks = new ArrayList<>();
+    private List<ChunkDraft> splitParsedDocument(ParsedDocument parsedDocument) {
+        List<ParsedSegment> segments = parsedDocument.segments();
+        if (segments == null || segments.isEmpty()) {
+            segments = List.of(new ParsedSegment(
+                    parsedDocument.rawText(),
+                    parsedDocument.fileName(),
+                    parsedDocument.contentType(),
+                    null,
+                    null,
+                    0,
+                    parsedDocument.rawText() == null ? 0 : parsedDocument.rawText().length()
+            ));
+        }
+
+        List<ChunkDraft> chunks = new ArrayList<>();
+        for (ParsedSegment segment : segments) {
+            chunks.addAll(splitSegment(segment));
+        }
+        return chunks;
+    }
+
+    private List<ChunkDraft> splitSegment(ParsedSegment segment) {
+        String normalized = segment.text() == null ? "" : segment.text().replace("\r\n", "\n").trim();
+        List<ChunkDraft> chunks = new ArrayList<>();
         int start = 0;
 
         while (start < normalized.length()) {
@@ -284,7 +381,16 @@ public class KnowledgeBaseService {
 
             String chunk = normalized.substring(start, end).trim();
             if (!chunk.isBlank()) {
-                chunks.add(chunk);
+                int absoluteStart = (segment.startOffset() == null ? 0 : segment.startOffset()) + start;
+                chunks.add(new ChunkDraft(
+                        chunk,
+                        segment.sourceName(),
+                        segment.contentType(),
+                        segment.sectionTitle(),
+                        segment.pageNumber(),
+                        absoluteStart,
+                        absoluteStart + chunk.length()
+                ));
             }
 
             if (end >= normalized.length()) {
@@ -311,5 +417,16 @@ public class KnowledgeBaseService {
             return 0;
         }
         return Math.max(1, text.length() / 2);
+    }
+
+    private record ChunkDraft(
+            String content,
+            String sourceName,
+            String contentType,
+            String sectionTitle,
+            Integer pageNumber,
+            Integer startOffset,
+            Integer endOffset
+    ) {
     }
 }

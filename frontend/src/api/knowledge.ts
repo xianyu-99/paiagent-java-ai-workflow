@@ -24,7 +24,24 @@ export interface KnowledgeDocument {
   id: number;
   knowledgeBaseId: number;
   fileName: string;
+  contentType?: string;
+  parserType?: string;
   chunkCount: number;
+  createdAt?: string;
+}
+
+export interface KnowledgeChunk {
+  id: number;
+  documentId: number;
+  chunkIndex: number;
+  content: string;
+  sourceName?: string;
+  contentType?: string;
+  sectionTitle?: string;
+  pageNumber?: number;
+  startOffset?: number;
+  endOffset?: number;
+  tokenCount?: number;
   createdAt?: string;
 }
 
@@ -58,10 +75,21 @@ export const uploadKnowledgeFile = (
   return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents/file`, formData);
 };
 
+export const deleteKnowledgeBase = (knowledgeBaseId: number): Promise<ApiResult<void>> => {
+  return api.delete(`/api/knowledge-bases/${knowledgeBaseId}`);
+};
+
 export const listKnowledgeDocuments = (
   knowledgeBaseId: number
 ): Promise<ApiResult<KnowledgeDocument[]>> => {
   return api.get(`/api/knowledge-bases/${knowledgeBaseId}/documents`);
+};
+
+export const listKnowledgeChunks = (
+  knowledgeBaseId: number,
+  documentId: number
+): Promise<ApiResult<KnowledgeChunk[]>> => {
+  return api.get(`/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`);
 };
 
 export const rebuildKnowledgeBaseEmbeddings = (

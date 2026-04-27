@@ -23,6 +23,10 @@ public class KnowledgeDocument {
 
     private String fileName;
 
+    private String contentType;
+
+    private String parserType;
+
     private String contentHash;
 
     private Integer chunkCount;

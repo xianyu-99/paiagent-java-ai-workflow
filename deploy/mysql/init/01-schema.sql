@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS knowledge_document (
     knowledge_base_id BIGINT NOT NULL,
     owner_id BIGINT NULL,
     file_name VARCHAR(255) NOT NULL,
+    content_type VARCHAR(150) NULL,
+    parser_type VARCHAR(50) NULL,
     content_hash VARCHAR(64) NOT NULL,
     chunk_count INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -96,6 +98,12 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     document_id BIGINT NOT NULL,
     chunk_index INT NOT NULL,
     content MEDIUMTEXT NOT NULL,
+    source_name VARCHAR(255) NULL,
+    content_type VARCHAR(150) NULL,
+    section_title VARCHAR(500) NULL,
+    page_number INT NULL,
+    start_offset INT NULL,
+    end_offset INT NULL,
     embedding JSON NOT NULL,
     embedding_provider VARCHAR(50) NULL,
     embedding_model VARCHAR(100) NULL,
@@ -106,6 +114,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     deleted TINYINT DEFAULT 0,
     INDEX idx_chunk_kb_id (knowledge_base_id),
     INDEX idx_chunk_doc_id (document_id),
+    INDEX idx_chunk_doc_page (document_id, page_number, chunk_index),
     INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

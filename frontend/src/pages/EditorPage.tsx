@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload } from 'antd';
-import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
+import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined, DatabaseOutlined } from '@ant-design/icons';
 import { Edge, MarkerType, Node } from '@xyflow/react';
 import NodePanel from '../components/NodePanel';
 import FlowCanvas from '../components/FlowCanvas';
@@ -1172,6 +1172,13 @@ const EditorPage = () => {
         <div className="flex items-center gap-3">
           {role === 'ADMIN' && <LLMConfigModal />}
           <Button
+            icon={<DatabaseOutlined />}
+            onClick={() => navigate('/knowledge')}
+            size="large"
+          >
+            知识库
+          </Button>
+          <Button
             icon={<PlusOutlined />}
             onClick={handleCreateNew}
             size="large"
@@ -1965,7 +1972,7 @@ const EditorPage = () => {
                             children: (
                               <>
                                 <Upload
-                                  accept=".txt,.md,.markdown,text/plain,text/markdown"
+                                  accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                   maxCount={1}
                                   beforeUpload={(file) => {
                                     setKnowledgeLocalFile(file);
@@ -1981,7 +1988,7 @@ const EditorPage = () => {
                                   }] : []}
                                 >
                                   <Button icon={<UploadOutlined />} block>
-                                    选择本地 txt / markdown 文件
+                                    选择本地 txt / md / pdf / docx 文件
                                   </Button>
                                 </Upload>
                                 <Button

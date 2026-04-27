@@ -106,6 +106,21 @@
 			<artifactId>minio</artifactId>
 			<version>8.5.7</version>
 		</dependency>
+		<dependency>
+			<groupId>org.apache.pdfbox</groupId>
+			<artifactId>pdfbox</artifactId>
+			<version>3.0.3</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi-ooxml</artifactId>
+			<version>5.2.5</version>
+		</dependency>
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-compress</artifactId>
+			<version>1.26.2</version>
+		</dependency>
 		<!-- Spring AI OpenAI (支持OpenAI、DeepSeek和通义千问的OpenAI兼容接口) -->
 		<dependency>
 			<groupId>org.springframework.ai</groupId>

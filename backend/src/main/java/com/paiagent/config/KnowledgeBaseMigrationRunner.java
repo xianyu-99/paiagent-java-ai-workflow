@@ -20,8 +20,10 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         createKnowledgeBaseTable();
         createKnowledgeDocumentTable();
+        migrateKnowledgeDocumentMetadata();
         createKnowledgeChunkTable();
         migrateKnowledgeChunkEmbeddingMetadata();
+        migrateKnowledgeChunkSourceMetadata();
         upsertRagNodeDefinition();
     }
 
@@ -48,6 +50,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     knowledge_base_id BIGINT NOT NULL,
                     owner_id BIGINT NULL,
                     file_name VARCHAR(255) NOT NULL,
+                    content_type VARCHAR(150) NULL,
+                    parser_type VARCHAR(50) NULL,
                     content_hash VARCHAR(64) NOT NULL,
                     chunk_count INT DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -60,6 +64,13 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                 """);
     }
 
+    private void migrateKnowledgeDocumentMetadata() {
+        addColumnIfMissing("knowledge_document", "content_type",
+                "ALTER TABLE knowledge_document ADD COLUMN content_type VARCHAR(150) NULL AFTER file_name");
+        addColumnIfMissing("knowledge_document", "parser_type",
+                "ALTER TABLE knowledge_document ADD COLUMN parser_type VARCHAR(50) NULL AFTER content_type");
+    }
+
     private void createKnowledgeChunkTable() {
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS knowledge_chunk (
@@ -68,6 +79,12 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     document_id BIGINT NOT NULL,
                     chunk_index INT NOT NULL,
                     content MEDIUMTEXT NOT NULL,
+                    source_name VARCHAR(255) NULL,
+                    content_type VARCHAR(150) NULL,
+                    section_title VARCHAR(500) NULL,
+                    page_number INT NULL,
+                    start_offset INT NULL,
+                    end_offset INT NULL,
                     embedding JSON NOT NULL,
                     token_count INT DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -88,6 +105,23 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE knowledge_chunk ADD COLUMN embedding_dimension INT NULL AFTER embedding_model");
         addIndexIfMissing("knowledge_chunk", "idx_chunk_embedding_meta",
                 "ALTER TABLE knowledge_chunk ADD INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)");
+    }
+
+    private void migrateKnowledgeChunkSourceMetadata() {
+        addColumnIfMissing("knowledge_chunk", "source_name",
+                "ALTER TABLE knowledge_chunk ADD COLUMN source_name VARCHAR(255) NULL AFTER content");
+        addColumnIfMissing("knowledge_chunk", "content_type",
+                "ALTER TABLE knowledge_chunk ADD COLUMN content_type VARCHAR(150) NULL AFTER source_name");
+        addColumnIfMissing("knowledge_chunk", "section_title",
+                "ALTER TABLE knowledge_chunk ADD COLUMN section_title VARCHAR(500) NULL AFTER content_type");
+        addColumnIfMissing("knowledge_chunk", "page_number",
+                "ALTER TABLE knowledge_chunk ADD COLUMN page_number INT NULL AFTER section_title");
+        addColumnIfMissing("knowledge_chunk", "start_offset",
+                "ALTER TABLE knowledge_chunk ADD COLUMN start_offset INT NULL AFTER page_number");
+        addColumnIfMissing("knowledge_chunk", "end_offset",
+                "ALTER TABLE knowledge_chunk ADD COLUMN end_offset INT NULL AFTER start_offset");
+        addIndexIfMissing("knowledge_chunk", "idx_chunk_doc_page",
+                "ALTER TABLE knowledge_chunk ADD INDEX idx_chunk_doc_page (document_id, page_number, chunk_index)");
     }
 
     private void addColumnIfMissing(String tableName, String columnName, String ddl) {
