@@ -85,5 +85,11 @@ paiagent:
   # 留空则禁用默认账户，必须通过注册功能创建账户
   default-username: ${APP_AUTH_DEFAULT_USERNAME:admin}
   default-password: ${APP_AUTH_DEFAULT_PASSWORD:admin123}
+  execution:
+    node-timeout-ms: ${WORKFLOW_NODE_TIMEOUT_MS:120000}
+    node-retry-count: ${WORKFLOW_NODE_RETRY_COUNT:0}
+    max-node-retry-count: ${WORKFLOW_MAX_NODE_RETRY_COUNT:3}
+    node-retry-backoff-ms: ${WORKFLOW_NODE_RETRY_BACKOFF_MS:500}
+    node-executor-pool-size: ${WORKFLOW_NODE_EXECUTOR_POOL_SIZE:8}
   skills:
     path: skills

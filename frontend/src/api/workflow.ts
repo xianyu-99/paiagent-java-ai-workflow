@@ -153,6 +153,12 @@ export const executeWorkflowStream = async (
     const event = JSON.parse(e.data) as ExecutionEvent;
     onEvent(event);
   });
+
+  eventSource.addEventListener('NODE_RETRY', (e) => {
+    hasReceivedData = true;
+    const event = JSON.parse(e.data) as ExecutionEvent;
+    onEvent(event);
+  });
   
   eventSource.addEventListener('NODE_ERROR', (e) => {
     hasReceivedData = true;

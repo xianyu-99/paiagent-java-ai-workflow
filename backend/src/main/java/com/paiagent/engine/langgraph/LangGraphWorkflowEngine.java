@@ -116,6 +116,9 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             record.setStatus(status);
             record.setNodeResults(JSON.toJSONString(nodeResultsList));
             record.setErrorMessage(errorMessage);
+            record.setErrorLog(JSON.toJSONString(new ArrayList<>()));
+            record.setRetryCount(0);
+            record.setTimeoutCount(0);
             record.setDuration(duration);
             
             executionRecordMapper.insert(record);
@@ -144,6 +147,10 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             
             response.setOutputData(outputDataJson);
             response.setDuration(duration);
+            response.setErrorMessage(errorMessage);
+            response.setErrorLog(record.getErrorLog());
+            response.setRetryCount(0);
+            response.setTimeoutCount(0);
             
             log.info("工作流执行完成: status={}, duration={}ms", status, duration);
             return response;
@@ -169,6 +176,14 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             record.setInputData(JSON.toJSONString(Map.of("input", inputData)));
             record.setStatus("FAILED");
             record.setErrorMessage(errorMessage);
+            record.setErrorLog(JSON.toJSONString(java.util.List.of(Map.of(
+                    "scope", "workflow",
+                    "errorType", e.getClass().getSimpleName(),
+                    "message", errorMessage == null ? "" : errorMessage,
+                    "timestamp", System.currentTimeMillis()
+            ))));
+            record.setRetryCount(0);
+            record.setTimeoutCount(0);
             record.setDuration(duration);
             executionRecordMapper.insert(record);
             
@@ -179,6 +194,10 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             response.setNodeResults(new ArrayList<>());
             response.setOutputData(null);
             response.setDuration(duration);
+            response.setErrorMessage(errorMessage);
+            response.setErrorLog(record.getErrorLog());
+            response.setRetryCount(0);
+            response.setTimeoutCount(0);
             
             return response;
         }

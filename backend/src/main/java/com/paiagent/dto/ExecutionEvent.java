@@ -54,6 +54,31 @@ public class ExecutionEvent {
         event.setTimestamp(System.currentTimeMillis());
         return event;
     }
+
+    public static ExecutionEvent nodeRetry(
+            String nodeId,
+            String nodeName,
+            int failedAttempt,
+            int maxAttempts,
+            String error,
+            long backoffMs) {
+        ExecutionEvent event = new ExecutionEvent();
+        event.setEventType("NODE_RETRY");
+        event.setNodeId(nodeId);
+        event.setNodeName(nodeName);
+        event.setStatus("RETRYING");
+        event.setMessage("节点第 " + failedAttempt + " 次执行失败，准备重试 "
+                + (failedAttempt + 1) + "/" + maxAttempts + ": " + error);
+        java.util.Map<String, Object> data = new java.util.HashMap<>();
+        data.put("failedAttempt", failedAttempt);
+        data.put("nextAttempt", failedAttempt + 1);
+        data.put("maxAttempts", maxAttempts);
+        data.put("error", error);
+        data.put("backoffMs", backoffMs);
+        event.setData(data);
+        event.setTimestamp(System.currentTimeMillis());
+        return event;
+    }
     
     public static ExecutionEvent workflowComplete(String status, Object output, int duration) {
         ExecutionEvent event = new ExecutionEvent();

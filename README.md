@@ -267,6 +267,7 @@ http://你的局域网IP:5173
 - 增加注册、登录、角色权限和用户工作流隔离
 - 增加 BCrypt 密码加密
 - 增加 API Key AES/GCM 加密存储和启动迁移
+- 增加执行可靠性基础版：运行中状态记录、节点超时、失败重试、错误日志、重试事件推送
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
 
 ## 当前边界
@@ -274,18 +275,18 @@ http://你的局域网IP:5173
 - DAG 引擎是当前主要可运行路径
 - LangGraph4j 已有基础适配代码，但条件分支、循环和复杂 Agent 状态流仍属于后续增强方向
 - RAG 知识库节点暂未实现
-- 节点超时、失败重试、执行中断、工作流发布版本等可靠性能力仍可继续扩展
+- 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 
 ## 简历描述参考
 
-> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测和上下文传递；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
+> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测和上下文传递；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
 
 ## 后续规划
 
 - 跑通 LangGraph4j 条件分支和循环执行
 - 增加 if/else 条件节点和分类器节点
 - 增加 RAG 知识库节点：文件上传、切片、Embedding、向量检索、LLM 回答
-- 增加节点超时、失败重试、执行中断和工作流版本发布
+- 增加执行中断、工作流版本发布和执行快照
 - 增加更多模型供应商和统一模型健康检查
 
 ## 项目来源

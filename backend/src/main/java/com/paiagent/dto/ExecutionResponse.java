@@ -14,6 +14,10 @@ public class ExecutionResponse {
     private List<NodeResult> nodeResults;
     private String outputData;
     private Integer duration;
+    private String errorMessage;
+    private String errorLog;
+    private Integer retryCount;
+    private Integer timeoutCount;
     
     @Data
     public static class NodeResult {
@@ -24,5 +28,10 @@ public class ExecutionResponse {
         private String output;
         private Integer duration;
         private String error;
+        private String errorType;
+        private Integer attempts;
+        private Integer retryCount;
+        private Long timeoutMs;
+        private Object attemptLogs;
     }
 }

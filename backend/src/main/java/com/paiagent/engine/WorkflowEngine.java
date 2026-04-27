@@ -4,8 +4,10 @@ import com.alibaba.fastjson2.JSON;
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.dto.ExecutionResponse;
 import com.paiagent.engine.dag.DAGParser;
-import com.paiagent.engine.executor.NodeExecutor;
-import com.paiagent.engine.executor.NodeExecutorFactory;
+import com.paiagent.engine.execution.NodeExecutionAttempt;
+import com.paiagent.engine.execution.NodeExecutionException;
+import com.paiagent.engine.execution.NodeExecutionOutcome;
+import com.paiagent.engine.execution.NodeExecutionRunner;
 import com.paiagent.engine.model.WorkflowConfig;
 import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.entity.ExecutionRecord;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -29,7 +32,7 @@ public class WorkflowEngine implements WorkflowExecutor {
     private DAGParser dagParser;
     
     @Autowired
-    private NodeExecutorFactory executorFactory;
+    private NodeExecutionRunner nodeExecutionRunner;
     
     @Autowired
     private ExecutionRecordMapper executionRecordMapper;
@@ -42,12 +45,10 @@ public class WorkflowEngine implements WorkflowExecutor {
     @Override
     public ExecutionResponse executeWithCallback(Workflow workflow, String inputData, Consumer<ExecutionEvent> eventCallback) {
         long startTime = System.currentTimeMillis();
-        
-        WorkflowConfig config = JSON.parseObject(workflow.getFlowData(), WorkflowConfig.class);
-        List<WorkflowNode> sortedNodes = dagParser.parse(config);
-        
+
         List<ExecutionResponse.NodeResult> nodeResults = new ArrayList<>();
         Map<String, Map<String, Object>> nodeOutputs = new HashMap<>();
+        List<Map<String, Object>> errorLogs = new ArrayList<>();
         
         Map<String, Object> currentInput = new HashMap<>();
         currentInput.put("input", inputData);
@@ -55,13 +56,19 @@ public class WorkflowEngine implements WorkflowExecutor {
         String status = "SUCCESS";
         String errorMessage = null;
         String outputData = null;
+        int totalRetryCount = 0;
+        int totalTimeoutCount = 0;
         
-        ExecutionRecord record = new ExecutionRecord();
+        ExecutionRecord record = createRunningRecord(workflow, inputData);
+        executionRecordMapper.insert(record);
         
         try {
             if (eventCallback != null) {
-                eventCallback.accept(ExecutionEvent.workflowStart(null));
+                eventCallback.accept(ExecutionEvent.workflowStart(record.getId()));
             }
+
+            WorkflowConfig config = JSON.parseObject(workflow.getFlowData(), WorkflowConfig.class);
+            List<WorkflowNode> sortedNodes = dagParser.parse(config);
             
             for (WorkflowNode node : sortedNodes) {
                 long nodeStartTime = System.currentTimeMillis();
@@ -76,13 +83,21 @@ public class WorkflowEngine implements WorkflowExecutor {
                 nodeResult.setInput(JSON.toJSONString(currentInput));
                 
                 try {
-                    NodeExecutor executor = executorFactory.getExecutor(node.getType());
-                    Map<String, Object> output = executor.execute(node, currentInput, eventCallback);
+                    NodeExecutionOutcome outcome = nodeExecutionRunner.execute(node, currentInput, eventCallback);
+                    Map<String, Object> output = outcome.getOutput();
+
+                    totalRetryCount += outcome.getRetryCount();
+                    totalTimeoutCount += countTimeouts(outcome.getAttempts());
+                    appendFailedAttempts(errorLogs, node, outcome.getAttempts());
                     
                     nodeOutputs.put(node.getId(), output);
                     
                     nodeResult.setStatus("SUCCESS");
                     nodeResult.setOutput(JSON.toJSONString(output));
+                    nodeResult.setAttempts(outcome.getAttempts().size());
+                    nodeResult.setRetryCount(outcome.getRetryCount());
+                    nodeResult.setTimeoutMs(outcome.getTimeoutMs());
+                    nodeResult.setAttemptLogs(outcome.getAttempts());
                     
                     long nodeEndTime = System.currentTimeMillis();
                     int nodeDuration = (int) (nodeEndTime - nodeStartTime);
@@ -93,11 +108,36 @@ public class WorkflowEngine implements WorkflowExecutor {
                         eventData.put("input", currentInput);
                         eventData.put("output", output);
                         eventData.put("duration", nodeDuration);
+                        eventData.put("attempts", outcome.getAttempts().size());
+                        eventData.put("retryCount", outcome.getRetryCount());
+                        eventData.put("timeoutMs", outcome.getTimeoutMs());
                         eventCallback.accept(ExecutionEvent.nodeSuccess(node.getId(), node.getType(), eventData, nodeDuration));
                     }
                     
                     currentInput = output;
                     
+                } catch (NodeExecutionException e) {
+                    log.error("节点执行失败: {}", node.getId(), e);
+
+                    totalRetryCount += e.getRetryCount();
+                    totalTimeoutCount += countTimeouts(e.getAttempts());
+                    appendFailedAttempts(errorLogs, node, e.getAttempts());
+
+                    nodeResult.setStatus("FAILED");
+                    nodeResult.setError(e.getMessage());
+                    nodeResult.setErrorType(e.getErrorType());
+                    nodeResult.setAttempts(e.getAttempts().size());
+                    nodeResult.setRetryCount(e.getRetryCount());
+                    nodeResult.setTimeoutMs(e.getTimeoutMs());
+                    nodeResult.setAttemptLogs(e.getAttempts());
+                    status = "FAILED";
+                    errorMessage = e.getMessage();
+
+                    if (eventCallback != null) {
+                        eventCallback.accept(ExecutionEvent.nodeError(node.getId(), node.getType(), e.getMessage()));
+                    }
+
+                    throw e;
                 } catch (Exception e) {
                     log.error("节点执行失败: {}", node.getId(), e);
                     nodeResult.setStatus("FAILED");
@@ -124,6 +164,9 @@ public class WorkflowEngine implements WorkflowExecutor {
             if (errorMessage == null) {
                 errorMessage = e.getMessage();
             }
+            if (!(e instanceof NodeExecutionException)) {
+                errorLogs.add(buildWorkflowErrorLog(e));
+            }
         }
         
         long endTime = System.currentTimeMillis();
@@ -133,19 +176,17 @@ public class WorkflowEngine implements WorkflowExecutor {
             eventCallback.accept(ExecutionEvent.workflowComplete(status, currentInput, duration));
         }
         
-        record.setFlowId(workflow.getId());
-        Map<String, Object> inputDataMap = new HashMap<>();
-        inputDataMap.put("input", inputData);
-        String inputDataJson = JSON.toJSONString(inputDataMap);
-        log.info("保存执行记录 - inputData: {}", inputDataJson);
+        log.info("保存执行记录 - inputData: {}", record.getInputData());
         log.info("保存执行记录 - outputData: {}", outputData);
-        record.setInputData(inputDataJson);
         record.setOutputData(outputData);
         record.setStatus(status);
         record.setNodeResults(JSON.toJSONString(nodeResults));
         record.setErrorMessage(errorMessage);
+        record.setErrorLog(JSON.toJSONString(errorLogs));
+        record.setRetryCount(totalRetryCount);
+        record.setTimeoutCount(totalTimeoutCount);
         record.setDuration(duration);
-        executionRecordMapper.insert(record);
+        executionRecordMapper.updateById(record);
         
         ExecutionResponse response = new ExecutionResponse();
         response.setExecutionId(record.getId());
@@ -153,6 +194,10 @@ public class WorkflowEngine implements WorkflowExecutor {
         response.setNodeResults(nodeResults);
         response.setOutputData(outputData);
         response.setDuration(duration);
+        response.setErrorMessage(errorMessage);
+        response.setErrorLog(record.getErrorLog());
+        response.setRetryCount(totalRetryCount);
+        response.setTimeoutCount(totalTimeoutCount);
         
         return response;
     }
@@ -160,5 +205,63 @@ public class WorkflowEngine implements WorkflowExecutor {
     @Override
     public String getEngineType() {
         return "dag";
+    }
+
+    private ExecutionRecord createRunningRecord(Workflow workflow, String inputData) {
+        ExecutionRecord record = new ExecutionRecord();
+        record.setFlowId(workflow.getId());
+        Map<String, Object> inputDataMap = new HashMap<>();
+        inputDataMap.put("input", inputData);
+        record.setInputData(JSON.toJSONString(inputDataMap));
+        record.setStatus("RUNNING");
+        record.setNodeResults(JSON.toJSONString(new ArrayList<>()));
+        record.setDuration(0);
+        return record;
+    }
+
+    private int countTimeouts(List<NodeExecutionAttempt> attempts) {
+        if (attempts == null) {
+            return 0;
+        }
+        int count = 0;
+        for (NodeExecutionAttempt attempt : attempts) {
+            if ("TIMEOUT".equals(attempt.getErrorType())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private void appendFailedAttempts(
+            List<Map<String, Object>> errorLogs,
+            WorkflowNode node,
+            List<NodeExecutionAttempt> attempts
+    ) {
+        if (attempts == null) {
+            return;
+        }
+        for (NodeExecutionAttempt attempt : attempts) {
+            if (!"FAILED".equals(attempt.getStatus())) {
+                continue;
+            }
+            Map<String, Object> logEntry = new LinkedHashMap<>();
+            logEntry.put("nodeId", node.getId());
+            logEntry.put("nodeName", node.getType());
+            logEntry.put("attempt", attempt.getAttempt());
+            logEntry.put("errorType", attempt.getErrorType());
+            logEntry.put("message", attempt.getMessage());
+            logEntry.put("duration", attempt.getDuration());
+            logEntry.put("timestamp", attempt.getTimestamp());
+            errorLogs.add(logEntry);
+        }
+    }
+
+    private Map<String, Object> buildWorkflowErrorLog(Exception e) {
+        Map<String, Object> logEntry = new LinkedHashMap<>();
+        logEntry.put("scope", "workflow");
+        logEntry.put("errorType", e.getClass().getSimpleName());
+        logEntry.put("message", e.getMessage());
+        logEntry.put("timestamp", System.currentTimeMillis());
+        return logEntry;
     }
 }

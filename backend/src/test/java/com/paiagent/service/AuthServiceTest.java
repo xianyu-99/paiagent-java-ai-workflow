@@ -1,9 +1,13 @@
 package com.paiagent.service;
 
+import com.paiagent.common.UserRole;
 import com.paiagent.config.JwtSecretProvider;
+import com.paiagent.entity.AppUser;
+import com.paiagent.mapper.AppUserMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Duration;
@@ -61,10 +65,15 @@ class AuthServiceTest {
         AuthService authService = new AuthService();
         JwtSecretProvider jwtSecretProvider = mock(JwtSecretProvider.class);
         StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        AppUserMapper appUserMapper = mock(AppUserMapper.class);
+        BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         @SuppressWarnings("unchecked")
         ValueOperations<String, String> valueOperations = mock(ValueOperations.class);
+        AppUser defaultUser = createDefaultUser(passwordEncoder);
 
         when(jwtSecretProvider.getSecret()).thenReturn(JWT_SECRET);
+        when(appUserMapper.selectOne(any())).thenReturn(defaultUser);
+        when(appUserMapper.selectById(1L)).thenReturn(defaultUser);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         doAnswer(invocation -> {
             redisStore.put(invocation.getArgument(0), invocation.getArgument(1));
@@ -79,6 +88,19 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(authService, "defaultUsername", DEFAULT_USERNAME);
         ReflectionTestUtils.setField(authService, "defaultPassword", DEFAULT_PASSWORD);
         ReflectionTestUtils.setField(authService, "stringRedisTemplate", redisTemplate);
+        ReflectionTestUtils.setField(authService, "appUserMapper", appUserMapper);
+        ReflectionTestUtils.setField(authService, "passwordEncoder", passwordEncoder);
         return authService;
+    }
+
+    private AppUser createDefaultUser(BCryptPasswordEncoder passwordEncoder) {
+        AppUser user = new AppUser();
+        user.setId(1L);
+        user.setUsername(DEFAULT_USERNAME);
+        user.setPasswordHash(passwordEncoder.encode(DEFAULT_PASSWORD));
+        user.setRole(UserRole.ADMIN.name());
+        user.setEnabled(1);
+        user.setDeleted(0);
+        return user;
     }
 }

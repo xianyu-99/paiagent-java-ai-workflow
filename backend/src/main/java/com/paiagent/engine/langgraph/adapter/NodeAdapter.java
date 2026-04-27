@@ -1,8 +1,8 @@
 package com.paiagent.engine.langgraph.adapter;
 
 import com.paiagent.dto.ExecutionEvent;
-import com.paiagent.engine.executor.NodeExecutor;
-import com.paiagent.engine.executor.NodeExecutorFactory;
+import com.paiagent.engine.execution.NodeExecutionOutcome;
+import com.paiagent.engine.execution.NodeExecutionRunner;
 import com.paiagent.engine.langgraph.WorkflowState;
 import com.paiagent.engine.model.WorkflowNode;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +27,7 @@ import java.util.function.Consumer;
 public class NodeAdapter {
     
     @Autowired
-    private NodeExecutorFactory executorFactory;
+    private NodeExecutionRunner nodeExecutionRunner;
     
     /**
      * 将 WorkflowNode 适配为 LangGraph AsyncNodeAction
@@ -47,9 +47,6 @@ public class NodeAdapter {
                     eventCallback.accept(ExecutionEvent.nodeStart(node.getId(), node.getType()));
                 }
                 
-                // 获取节点执行器
-                NodeExecutor executor = executorFactory.getExecutor(node.getType());
-                
                 // 从状态中提取当前输入
                 Map<String, Object> stateData = state.data();
                 @SuppressWarnings("unchecked")
@@ -64,8 +61,9 @@ public class NodeAdapter {
                     currentInput.put("__nodeOutputs__", nodeOutputs);
                 }
                 
-                // 执行节点
-                Map<String, Object> output = executor.execute(node, currentInput, eventCallback);
+                // 执行节点，复用统一的超时和重试策略
+                NodeExecutionOutcome outcome = nodeExecutionRunner.execute(node, currentInput, eventCallback);
+                Map<String, Object> output = outcome.getOutput();
                 
                 // 更新状态
                 Map<String, Object> newStateData = new HashMap<>(stateData);
@@ -88,6 +86,9 @@ public class NodeAdapter {
                     eventData.put("input", currentInput);
                     eventData.put("output", output);
                     eventData.put("duration", duration);
+                    eventData.put("attempts", outcome.getAttempts().size());
+                    eventData.put("retryCount", outcome.getRetryCount());
+                    eventData.put("timeoutMs", outcome.getTimeoutMs());
                     eventCallback.accept(ExecutionEvent.nodeSuccess(node.getId(), node.getType(), eventData, (int) duration));
                 }
                 

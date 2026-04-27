@@ -46,6 +46,21 @@ public class ExecutionRecord {
      * 错误信息
      */
     private String errorMessage;
+
+    /**
+     * 结构化错误日志 - JSON 格式
+     */
+    private String errorLog;
+
+    /**
+     * 本次执行触发的重试次数
+     */
+    private Integer retryCount;
+
+    /**
+     * 本次执行触发的超时次数
+     */
+    private Integer timeoutCount;
     
     /**
      * 执行耗时(毫秒)
