@@ -99,10 +99,12 @@ public class Skill {
         // 直接嵌入所有 reference 内容
         if (referenceContents != null && !referenceContents.isEmpty()) {
             sb.append("## 参考文档\n\n");
-            for (Map.Entry<String, String> entry : referenceContents.entrySet()) {
-                sb.append("### ").append(entry.getKey()).append("\n\n");
-                sb.append(entry.getValue()).append("\n\n");
-            }
+            referenceContents.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(entry -> {
+                        sb.append("### ").append(entry.getKey()).append("\n\n");
+                        sb.append(entry.getValue()).append("\n\n");
+                    });
         }
 
         return sb.toString();

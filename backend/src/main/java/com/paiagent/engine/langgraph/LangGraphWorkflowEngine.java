@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.dto.ExecutionResponse;
 import com.paiagent.engine.WorkflowExecutor;
+import com.paiagent.engine.execution.WorkflowExecutionContextHolder;
 import com.paiagent.engine.langgraph.builder.GraphBuilder;
 import com.paiagent.engine.langgraph.state.StateManager;
 import com.paiagent.engine.model.WorkflowConfig;
@@ -30,6 +31,9 @@ import java.util.function.Consumer;
 @Slf4j
 @Service
 public class LangGraphWorkflowEngine implements WorkflowExecutor {
+
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
     
     @Autowired
     private GraphBuilder graphBuilder;
@@ -73,6 +77,7 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             
             // 3. 初始化状态（使用 AgentState）
             Map<String, Object> initialStateData = stateManager.initializeState(inputData);
+            addExecutionContext(initialStateData, workflow);
             
             // 4. 执行图
             log.info("开始执行 LangGraph");
@@ -206,5 +211,23 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
     @Override
     public String getEngineType() {
         return "langgraph";
+    }
+
+    @SuppressWarnings("unchecked")
+    private void addExecutionContext(Map<String, Object> initialStateData, Workflow workflow) {
+        WorkflowExecutionContextHolder.WorkflowExecutionContext context = WorkflowExecutionContextHolder.get();
+        Long userId = context == null ? workflow.getOwnerId() : context.userId();
+        boolean admin = context != null && context.admin();
+
+        Map<String, Object> currentInput = (Map<String, Object>) initialStateData.get("currentInput");
+        if (currentInput == null) {
+            currentInput = new HashMap<>();
+            initialStateData.put("currentInput", currentInput);
+        }
+
+        if (userId != null) {
+            currentInput.put(EXECUTION_USER_ID_CONTEXT_KEY, userId);
+        }
+        currentInput.put(EXECUTION_ADMIN_CONTEXT_KEY, admin);
     }
 }

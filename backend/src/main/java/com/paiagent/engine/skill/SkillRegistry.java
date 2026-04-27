@@ -13,8 +13,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -52,16 +55,14 @@ public class SkillRegistry {
         log.info("Loading skills from path: {}", skillsPath);
 
         int classpathLoaded = loadFromClasspath();
-        if (classpathLoaded > 0) {
-            log.info("Loaded {} skills from classpath", classpathLoaded);
-            return;
-        }
+        int fileSystemLoaded = loadFromFileSystem();
 
-        if (classpathLoaded == 0) {
-            log.warn("No skills loaded from classpath, fallback to file system");
+        if (skills.isEmpty()) {
+            log.warn("No skills loaded from classpath or file system");
+        } else {
+            log.info("Loaded {} skills total (classpath: {}, file system: {})",
+                    skills.size(), classpathLoaded, fileSystemLoaded);
         }
-
-        loadFromFileSystem();
     }
 
     private int loadFromClasspath() {
@@ -104,32 +105,36 @@ public class SkillRegistry {
         }
     }
 
-    private void loadFromFileSystem() {
+    private int loadFromFileSystem() {
         Path skillsDir = getSkillsPath();
         log.info("Trying to load skills from file system: {}", skillsDir.toAbsolutePath());
 
         if (!Files.exists(skillsDir)) {
-            log.warn("Skills directory not found: {}", skillsDir.toAbsolutePath());
-            return;
+            log.debug("Skills directory not found: {}", skillsDir.toAbsolutePath());
+            return 0;
         }
 
-        try {
-            List<Path> skillDirs = Files.list(skillsDir)
+        try (var paths = Files.list(skillsDir)) {
+            List<Path> skillDirs = paths
                     .filter(Files::isDirectory)
                     .collect(Collectors.toList());
 
+            int loaded = 0;
             for (Path skillDir : skillDirs) {
                 try {
                     Skill skill = skillLoader.load(skillDir);
                     register(skill);
+                    loaded++;
                 } catch (IOException e) {
                     log.warn("Failed to load skill from {}: {}", skillDir, e.getMessage());
                 }
             }
 
-            log.info("Loaded {} skills from file system", skills.size());
+            log.info("Loaded {} skills from file system", loaded);
+            return loaded;
         } catch (IOException e) {
             log.error("Failed to list skills directory", e);
+            return 0;
         }
     }
 
@@ -150,12 +155,15 @@ public class SkillRegistry {
     }
 
     private Map<String, String> loadClasspathReferences(PathMatchingResourcePatternResolver resolver, String skillDirName) {
-        Map<String, String> references = new HashMap<>();
+        Map<String, String> references = new LinkedHashMap<>();
         String pattern = "classpath*:" + skillsPath + "/" + skillDirName + "/reference/*.md";
 
         try {
             Resource[] referenceResources = resolver.getResources(pattern);
-            for (Resource referenceResource : referenceResources) {
+            List<Resource> sortedResources = Arrays.stream(referenceResources)
+                    .sorted(Comparator.comparing(resource -> Optional.ofNullable(resource.getFilename()).orElse("")))
+                    .toList();
+            for (Resource referenceResource : sortedResources) {
                 String fileName = referenceResource.getFilename();
                 if (fileName == null || !fileName.endsWith(".md")) {
                     continue;
@@ -205,6 +213,7 @@ public class SkillRegistry {
      */
     public void register(Skill skill) {
         skills.put(skill.getName(), skill);
+        referenceCache.remove(skill.getName());
         log.debug("Registered skill: {}", skill.getName());
     }
 
@@ -227,7 +236,10 @@ public class SkillRegistry {
      */
     public List<SkillSummary> getSkillSummaries() {
         return skills.values().stream()
-                .map(skill -> new SkillSummary(skill.getName(), skill.getDescription()))
+                .map(skill -> new SkillSummary(
+                        skill.getName(),
+                        skill.getDescription(),
+                        skill.getReferences() == null ? 0 : skill.getReferences().size()))
                 .sorted((a, b) -> a.name().compareTo(b.name()))
                 .collect(Collectors.toList());
     }
@@ -323,5 +335,5 @@ public class SkillRegistry {
     /**
      * Skill 摘要记录
      */
-    public record SkillSummary(String name, String description) {}
+    public record SkillSummary(String name, String description, int referenceCount) {}
 }

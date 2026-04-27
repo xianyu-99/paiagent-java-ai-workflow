@@ -16,5 +16,16 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom', 'zustand'],
+            antd: ['antd', '@ant-design/icons'],
+            flow: ['@xyflow/react'],
+          },
+        },
+      },
+    },
   };
 })

@@ -10,6 +10,7 @@ import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.service.MinioService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -19,6 +20,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -26,9 +28,14 @@ import java.util.function.Consumer;
 public class TTSNodeExecutor implements NodeExecutor {
     
     private static final int MAX_TTS_INPUT_LENGTH = 400;
+    private static final int MAX_AUDIO_DOWNLOAD_BYTES = 50 * 1024 * 1024;
     
     @Autowired
     private MinioService minioService;
+
+    @Autowired
+    @Qualifier("ttsTaskExecutor")
+    private Executor ttsTaskExecutor;
     
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input) throws Exception {
@@ -136,7 +143,7 @@ public class TTSNodeExecutor implements NodeExecutor {
                 } catch (Exception e) {
                     throw new RuntimeException("处理第 " + (chunkIndex + 1) + " 个片段失败: " + e.getMessage(), e);
                 }
-            });
+            }, ttsTaskExecutor);
             
             futures.add(future);
         }
@@ -290,16 +297,29 @@ public class TTSNodeExecutor implements NodeExecutor {
     
     private byte[] downloadAudio(String audioUrl) throws Exception {
         URL url = new URL(audioUrl);
+        String protocol = url.getProtocol();
+        if (!"https".equalsIgnoreCase(protocol) && !"http".equalsIgnoreCase(protocol)) {
+            throw new IllegalArgumentException("不支持的音频下载协议: " + protocol);
+        }
+
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(30000);
         conn.setReadTimeout(30000);
         
+        int statusCode = conn.getResponseCode();
+        if (statusCode < 200 || statusCode >= 300) {
+            throw new IllegalStateException("音频下载失败，HTTP 状态码: " + statusCode);
+        }
+
         try (InputStream is = conn.getInputStream();
              ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[8192];
             int bytesRead;
             while ((bytesRead = is.read(buffer)) != -1) {
+                if (baos.size() + bytesRead > MAX_AUDIO_DOWNLOAD_BYTES) {
+                    throw new IllegalStateException("音频文件超过下载大小限制");
+                }
                 baos.write(buffer, 0, bytesRead);
             }
             return baos.toByteArray();

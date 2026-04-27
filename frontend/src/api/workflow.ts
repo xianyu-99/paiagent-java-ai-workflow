@@ -1,6 +1,6 @@
 import api from '../utils/request';
 import { buildBackendUrl } from '../config/api';
-import { clearStoredAuth, ensureValidAccessToken } from '../utils/auth';
+import { clearStoredAuth } from '../utils/auth';
 
 export interface NodeDefinition {
   id: number;
@@ -106,6 +106,27 @@ export interface ExecutionEvent {
   timestamp?: number;
 }
 
+interface StreamTicketResponse {
+  ticket: string;
+  expiresInSeconds: number;
+}
+
+const createWorkflowStreamTicket = (id: number): Promise<ApiResult<StreamTicketResponse>> => {
+  return api.post(`/api/workflows/${id}/execute/stream-ticket`);
+};
+
+const getResponseStatus = (error: unknown) => {
+  return (error as { response?: { status?: number } }).response?.status;
+};
+
+const getResponseMessage = (error: unknown, fallback: string) => {
+  const responseMessage = (error as { response?: { data?: { message?: string } } }).response?.data?.message;
+  if (responseMessage) {
+    return responseMessage;
+  }
+  return error instanceof Error ? error.message : fallback;
+};
+
 export const executeWorkflowStream = async (
   id: number, 
   inputData: string, 
@@ -113,17 +134,32 @@ export const executeWorkflowStream = async (
   onComplete: () => void,
   onError: (error: Error) => void
 ) => {
-  const token = await ensureValidAccessToken();
-  
-  if (!token) {
-    clearStoredAuth();
-    window.location.href = '/login';
-    onError(new Error('未登录'));
+  let ticket: string | undefined;
+  try {
+    const ticketResult = await createWorkflowStreamTicket(id);
+    if (ticketResult.code !== 200) {
+      onError(new Error(ticketResult.message || '创建实时执行票据失败'));
+      return null;
+    }
+    ticket = ticketResult.data?.ticket;
+  } catch (error) {
+    if (getResponseStatus(error) === 401) {
+      clearStoredAuth();
+      window.location.href = '/login';
+      onError(new Error('认证失败,请重新登录'));
+      return null;
+    }
+    onError(new Error(getResponseMessage(error, '创建实时执行票据失败')));
+    return null;
+  }
+
+  if (!ticket) {
+    onError(new Error('创建实时执行票据失败'));
     return null;
   }
   
   const url = buildBackendUrl(
-    `/api/workflows/${id}/execute/stream?inputData=${encodeURIComponent(inputData)}&token=${token}`
+    `/api/workflows/${id}/execute/stream?inputData=${encodeURIComponent(inputData)}&ticket=${encodeURIComponent(ticket)}`
   );
   
   const eventSource = new EventSource(url);
@@ -186,9 +222,7 @@ export const executeWorkflowStream = async (
     eventSource.close();
     
     if (!hasReceivedData) {
-      clearStoredAuth();
-      window.location.href = '/login';
-      onError(new Error('认证失败,请重新登录'));
+      onError(new Error('实时执行连接失败,请稍后重试'));
     } else {
       onError(new Error('连接中断'));
     }

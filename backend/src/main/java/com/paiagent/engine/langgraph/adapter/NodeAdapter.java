@@ -25,6 +25,9 @@ import java.util.function.Consumer;
 @Slf4j
 @Component
 public class NodeAdapter {
+
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
     
     @Autowired
     private NodeExecutionRunner nodeExecutionRunner;
@@ -126,6 +129,8 @@ public class NodeAdapter {
         }
         cleanData.remove("__nodeOutputs__");
         cleanData.remove("__nodeExecutionCount__");
+        cleanData.remove(EXECUTION_USER_ID_CONTEXT_KEY);
+        cleanData.remove(EXECUTION_ADMIN_CONTEXT_KEY);
         return cleanData;
     }
     

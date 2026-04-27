@@ -98,7 +98,7 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
         provider: config.provider,
         configName: config.configName,
         apiUrl: config.apiUrl,
-        apiKey: config.apiKey,
+        apiKey: '',
         model: config.model,
         temperature: config.temperature
       });
@@ -118,12 +118,13 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
     try {
       const values = await form.validateFields();
       const provider = normalizeProviderKey(values.provider);
+      const apiKey = values.apiKey?.trim();
       const request: LLMConfigRequest = {
         id: editingConfig?.id,
         provider,
         configName: values.configName,
         apiUrl: values.apiUrl,
-        apiKey: values.apiKey,
+        apiKey: apiKey || undefined,
         model: values.model,
         temperature: values.temperature
       };
@@ -348,9 +349,10 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
             <Form.Item
               name="apiKey"
               label="API 密钥"
-              rules={[{ required: true, message: '请输入 API 密钥' }]}
+              rules={editingConfig ? [] : [{ required: true, message: '请输入 API 密钥' }]}
+              extra={editingConfig ? '留空则沿用已保存的 API Key。' : undefined}
             >
-              <Input.Password placeholder="输入 API 密钥" />
+              <Input.Password placeholder={editingConfig ? '留空则不修改 API Key' : '输入 API 密钥'} />
             </Form.Item>
 
             <Form.Item

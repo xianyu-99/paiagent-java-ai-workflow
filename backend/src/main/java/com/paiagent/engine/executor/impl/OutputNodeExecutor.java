@@ -17,6 +17,11 @@ import java.util.regex.Pattern;
 @Slf4j
 @Component
 public class OutputNodeExecutor implements NodeExecutor {
+
+    private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
+    private static final String NODE_EXECUTION_COUNT_CONTEXT_KEY = "__nodeExecutionCount__";
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
     
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input) {
@@ -36,9 +41,9 @@ public class OutputNodeExecutor implements NodeExecutor {
             return output;
         }
         
-        log.info("输出节点配置 - responseContent: {}", responseContent);
-        log.info("输出节点配置 - outputParams: {}", nodeData.get("outputParams"));
-        log.info("输出节点输入数据: {}", input);
+        log.debug("输出节点配置 - responseContent: {}", summarizeForLog(responseContent));
+        log.debug("输出节点配置 - outputParams: {}", summarizeForLog(nodeData.get("outputParams")));
+        log.debug("输出节点输入数据: {}", summarizeForLog(removeInternalContext(input)));
         
         // 获取 outputParams 配置
         List<Map<String, Object>> outputParams = (List<Map<String, Object>>) nodeData.get("outputParams");
@@ -55,7 +60,7 @@ public class OutputNodeExecutor implements NodeExecutor {
                 } else if ("reference".equals(paramType)) {
                     // 引用其他节点的输出
                     String reference = (String) param.get("referenceNode");
-                    log.info("处理引用参数: {} -> {}", paramName, reference);
+                    log.debug("处理引用参数: {} -> {}", paramName, reference);
                     
                     if (reference != null && reference.contains(".")) {
                         String[] parts = reference.split("\\.");
@@ -65,15 +70,15 @@ public class OutputNodeExecutor implements NodeExecutor {
                         Object refValue = null;
                         
                         // 优先从 input 的上层 nodeOutputs 中查找（LangGraph 场景）
-                        if (input.containsKey("__nodeOutputs__")) {
+                        if (input.containsKey(NODE_OUTPUTS_CONTEXT_KEY)) {
                             @SuppressWarnings("unchecked")
                             Map<String, Map<String, Object>> nodeOutputs = 
-                                (Map<String, Map<String, Object>>) input.get("__nodeOutputs__");
+                                (Map<String, Map<String, Object>>) input.get(NODE_OUTPUTS_CONTEXT_KEY);
                             
                             if (nodeOutputs != null && nodeOutputs.containsKey(refNodeId)) {
                                 Map<String, Object> nodeOutput = nodeOutputs.get(refNodeId);
                                 refValue = nodeOutput.get(refParamName);
-                                log.info("从 nodeOutputs 中找到引用 {}.{} 的值: {}", refNodeId, refParamName, refValue);
+                                log.debug("从 nodeOutputs 中找到引用 {}.{} 的值: {}", refNodeId, refParamName, summarizeForLog(refValue));
                             }
                         }
                         
@@ -87,7 +92,7 @@ public class OutputNodeExecutor implements NodeExecutor {
                             refValue = input.get("input");
                         }
                         
-                        log.info("引用参数 {} 的值: {}", refParamName, refValue);
+                        log.debug("引用参数 {} 的值: {}", refParamName, summarizeForLog(refValue));
                         
                         if (refValue != null) {
                             paramValues.put(paramName, refValue.toString());
@@ -97,7 +102,7 @@ public class OutputNodeExecutor implements NodeExecutor {
             }
         }
         
-        log.info("参数值映射: {}", paramValues);
+        log.debug("参数值映射: {}", summarizeForLog(paramValues));
         
         // 替换模板中的 {{参数名}}
         String result = responseContent;
@@ -110,9 +115,33 @@ public class OutputNodeExecutor implements NodeExecutor {
             result = result.replace("{{" + paramName + "}}", paramValue);
         }
         
-        log.info("输出节点最终结果: {}", result);
+        log.debug("输出节点最终结果: {}", summarizeForLog(result));
         output.put("output", result);
         return output;
+    }
+
+    private Map<String, Object> removeInternalContext(Map<String, Object> data) {
+        Map<String, Object> cleanData = new HashMap<>();
+        if (data != null) {
+            cleanData.putAll(data);
+        }
+        cleanData.remove(NODE_OUTPUTS_CONTEXT_KEY);
+        cleanData.remove(NODE_EXECUTION_COUNT_CONTEXT_KEY);
+        cleanData.remove(EXECUTION_USER_ID_CONTEXT_KEY);
+        cleanData.remove(EXECUTION_ADMIN_CONTEXT_KEY);
+        return cleanData;
+    }
+
+    private String summarizeForLog(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        String text = String.valueOf(value);
+        int maxLength = 1000;
+        if (text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "...(truncated)";
     }
     
     @Override

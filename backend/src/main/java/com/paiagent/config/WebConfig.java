@@ -43,6 +43,15 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor)
                 .addPathPatterns("/api/**")
-                .excludePathPatterns("/api/auth/login", "/api/auth/register", "/api/auth/refresh", "/api/auth/current", "/api/node-types", "/swagger-ui/**", "/v3/api-docs/**");
+                .excludePathPatterns(
+                        "/api/auth/login",
+                        "/api/auth/register",
+                        "/api/auth/refresh",
+                        "/api/auth/current",
+                        "/api/node-types",
+                        "/api/workflows/*/execute/stream",
+                        "/swagger-ui/**",
+                        "/v3/api-docs/**"
+                );
     }
 }

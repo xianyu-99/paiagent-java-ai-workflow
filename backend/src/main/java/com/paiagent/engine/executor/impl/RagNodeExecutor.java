@@ -16,6 +16,9 @@ import java.util.stream.Collectors;
 @Component
 public class RagNodeExecutor extends AbstractLLMNodeExecutor {
 
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
+
     private static final String DEFAULT_PROMPT = """
             你是一个严谨的知识库问答助手。请只根据给定的知识库上下文回答问题。
             如果上下文没有相关信息，请直接说明“知识库中没有找到相关信息”，不要编造。
@@ -63,7 +66,16 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             ));
         }
 
-        List<RetrievedChunk> chunks = knowledgeBaseService.retrieve(knowledgeBaseId, question, topK, minScore);
+        Long executionUserId = toLong(input.get(EXECUTION_USER_ID_CONTEXT_KEY));
+        boolean executionAdmin = toBoolean(input.get(EXECUTION_ADMIN_CONTEXT_KEY));
+        List<RetrievedChunk> chunks = knowledgeBaseService.retrieveAuthorized(
+                knowledgeBaseId,
+                question,
+                topK,
+                minScore,
+                executionUserId,
+                executionAdmin
+        );
         String context = buildContext(chunks);
 
         if (progressCallback != null) {
@@ -218,6 +230,16 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             return Double.parseDouble(text);
         }
         return defaultValue;
+    }
+
+    private boolean toBoolean(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String text) {
+            return Boolean.parseBoolean(text);
+        }
+        return false;
     }
 
     private String stringValue(Object value) {

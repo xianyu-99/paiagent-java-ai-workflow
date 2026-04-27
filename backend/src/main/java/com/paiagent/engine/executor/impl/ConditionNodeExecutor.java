@@ -15,6 +15,10 @@ import java.util.Map;
 @Component
 public class ConditionNodeExecutor implements NodeExecutor {
 
+    private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
+
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input) {
         Map<String, Object> data = node.getData() == null ? Map.of() : node.getData();
@@ -27,7 +31,9 @@ public class ConditionNodeExecutor implements NodeExecutor {
         boolean matched = evaluate(leftValue, operator, rightValue, caseSensitive);
 
         Map<String, Object> output = new HashMap<>(input);
-        output.remove("__nodeOutputs__");
+        output.remove(NODE_OUTPUTS_CONTEXT_KEY);
+        output.remove(EXECUTION_USER_ID_CONTEXT_KEY);
+        output.remove(EXECUTION_ADMIN_CONTEXT_KEY);
         output.put("conditionResult", matched);
         output.put("selectedBranch", matched ? "true" : "false");
         output.put("leftValue", leftValue == null ? null : String.valueOf(leftValue));

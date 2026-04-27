@@ -5,7 +5,7 @@ export interface LLMGlobalConfig {
   provider: string;
   configName: string;
   apiUrl: string;
-  apiKey: string;
+  apiKey?: string;
   model: string;
   temperature: number;
   isDefault: number;

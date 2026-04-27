@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -44,7 +45,7 @@ public class SkillLoader {
             throw new IOException("Skill file not found: " + skillFile);
         }
 
-        String fileContent = Files.readString(skillFile);
+        String fileContent = Files.readString(skillFile, StandardCharsets.UTF_8);
         List<String> references = loadReferenceList(skillPath);
         return parseSkill(fileContent, skillPath, references, skillFile.toString());
     }
@@ -135,8 +136,8 @@ public class SkillLoader {
             return new ArrayList<>();
         }
 
-        try {
-            return Files.list(referenceDir)
+        try (var paths = Files.list(referenceDir)) {
+            return paths
                     .filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(".md"))
                     .map(p -> p.getFileName().toString())
@@ -173,6 +174,6 @@ public class SkillLoader {
             throw new IOException("Reference file not found: " + referenceFile);
         }
 
-        return Files.readString(referenceFile);
+        return Files.readString(referenceFile, StandardCharsets.UTF_8);
     }
 }

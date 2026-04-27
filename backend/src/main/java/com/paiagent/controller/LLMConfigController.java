@@ -32,14 +32,14 @@ public class LLMConfigController {
     @GetMapping("/{provider}")
     public Result<List<LLMGlobalConfig>> listByProvider(@PathVariable String provider, HttpServletRequest request) {
         List<LLMGlobalConfig> configs = llmGlobalConfigService.listByProvider(provider);
-        return Result.success(maskConfigsIfNeeded(configs, request));
+        return Result.success(maskConfigs(configs));
     }
 
     @Operation(summary = "获取所有配置列表")
     @GetMapping
     public Result<List<LLMGlobalConfig>> listAll(HttpServletRequest request) {
         List<LLMGlobalConfig> configs = llmGlobalConfigService.listAllForDisplay();
-        return Result.success(maskConfigsIfNeeded(configs, request));
+        return Result.success(maskConfigs(configs));
     }
 
     @Operation(summary = "获取配置详情")
@@ -49,14 +49,14 @@ public class LLMConfigController {
         if (config == null) {
             return Result.error("配置不存在");
         }
-        return Result.success(maskConfigIfNeeded(config, request));
+        return Result.success(maskConfig(config));
     }
 
     @Operation(summary = "获取指定提供商的默认配置")
     @GetMapping("/default/{provider}")
     public Result<LLMGlobalConfig> getDefaultConfig(@PathVariable String provider, HttpServletRequest request) {
         LLMGlobalConfig config = llmGlobalConfigService.getDefaultConfig(provider);
-        return Result.success(maskConfigIfNeeded(config, request));
+        return Result.success(maskConfig(config));
     }
 
     @Operation(summary = "保存配置（新增或更新）")
@@ -68,7 +68,7 @@ public class LLMConfigController {
 
         try {
             LLMGlobalConfig saved = llmGlobalConfigService.saveConfig(config);
-            return Result.success(saved);
+            return Result.success(maskConfig(saved));
         } catch (IllegalArgumentException e) {
             return Result.error("保存配置失败: " + e.getMessage());
         } catch (DuplicateKeyException e) {
@@ -104,20 +104,10 @@ public class LLMConfigController {
         }
     }
 
-    private List<LLMGlobalConfig> maskConfigsIfNeeded(List<LLMGlobalConfig> configs, HttpServletRequest request) {
-        if (AuthContext.isAdmin(request)) {
-            return configs;
-        }
+    private List<LLMGlobalConfig> maskConfigs(List<LLMGlobalConfig> configs) {
         return configs.stream()
                 .map(this::maskConfig)
                 .toList();
-    }
-
-    private LLMGlobalConfig maskConfigIfNeeded(LLMGlobalConfig config, HttpServletRequest request) {
-        if (config == null || AuthContext.isAdmin(request)) {
-            return config;
-        }
-        return maskConfig(config);
     }
 
     private LLMGlobalConfig maskConfig(LLMGlobalConfig config) {

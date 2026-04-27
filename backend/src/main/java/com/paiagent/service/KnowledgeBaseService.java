@@ -111,7 +111,7 @@ public class KnowledgeBaseService {
         if (knowledgeBase == null) {
             throw new IllegalArgumentException("知识库不存在");
         }
-        if (!admin && !knowledgeBase.getOwnerId().equals(userId)) {
+        if (!admin && (knowledgeBase.getOwnerId() == null || !knowledgeBase.getOwnerId().equals(userId))) {
             throw new ForbiddenException("无权访问该知识库");
         }
         return knowledgeBase;
@@ -316,6 +316,16 @@ public class KnowledgeBaseService {
                 .limit(safeTopK)
                 .map(this::toRetrievedChunk)
                 .toList();
+    }
+
+    public List<RetrievedChunk> retrieveAuthorized(Long knowledgeBaseId,
+                                                   String query,
+                                                   int topK,
+                                                   double minScore,
+                                                   Long userId,
+                                                   boolean admin) {
+        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        return retrieve(knowledgeBaseId, query, topK, minScore);
     }
 
     @Transactional

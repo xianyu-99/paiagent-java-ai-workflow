@@ -36,4 +36,29 @@ public class ExecutionProperties {
      * 节点执行线程池大小。
      */
     private int nodeExecutorPoolSize = 8;
+
+    /**
+     * 工作流异步执行线程池核心线程数。
+     */
+    private int workflowExecutorCoreSize = 4;
+
+    /**
+     * 工作流异步执行线程池最大线程数。
+     */
+    private int workflowExecutorMaxSize = 8;
+
+    /**
+     * 工作流异步执行队列容量。
+     */
+    private int workflowExecutorQueueCapacity = 100;
+
+    /**
+     * TTS 分片处理线程池大小。
+     */
+    private int ttsExecutorPoolSize = 4;
+
+    /**
+     * TTS 分片处理队列容量。
+     */
+    private int ttsExecutorQueueCapacity = 100;
 }

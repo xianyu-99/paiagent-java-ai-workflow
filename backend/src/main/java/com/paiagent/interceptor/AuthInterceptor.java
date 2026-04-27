@@ -27,10 +27,6 @@ public class AuthInterceptor implements HandlerInterceptor {
             token = token.substring(7);
         }
         
-        if (token == null) {
-            token = request.getParameter("token");
-        }
-        
         if (token == null || !authService.validateToken(token)) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json;charset=UTF-8");

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button, Card, Empty, Input, List, Modal, Popconfirm, Progress, Select, Space, Table, Tabs, Tag, Upload, message } from 'antd';
 import { ArrowLeftOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
@@ -39,25 +39,23 @@ const KnowledgeBasePage = () => {
 
   const selectedKnowledgeBase = knowledgeBases.find((kb) => kb.id === selectedKnowledgeBaseId);
 
-  const refreshKnowledgeBases = async () => {
+  const refreshKnowledgeBases = useCallback(async () => {
     setLoading(true);
     try {
       const response = await listKnowledgeBases();
       if (response.code === 200) {
         const list = response.data || [];
         setKnowledgeBases(list);
-        if (!selectedKnowledgeBaseId && list.length > 0) {
-          setSelectedKnowledgeBaseId(list[0].id);
-        }
+        setSelectedKnowledgeBaseId((current) => current || list[0]?.id);
       } else {
         message.error(response.message || '知识库加载失败');
       }
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const refreshDocuments = async (knowledgeBaseId?: number) => {
+  const refreshDocuments = useCallback(async (knowledgeBaseId?: number) => {
     if (!knowledgeBaseId) {
       setDocuments([]);
       return;
@@ -68,9 +66,9 @@ const KnowledgeBasePage = () => {
     } else {
       message.error(response.message || '文档加载失败');
     }
-  };
+  }, []);
 
-  const refreshImportTasks = async (knowledgeBaseId?: number) => {
+  const refreshImportTasks = useCallback(async (knowledgeBaseId?: number) => {
     if (!knowledgeBaseId) {
       setImportTasks([]);
       return;
@@ -87,16 +85,16 @@ const KnowledgeBasePage = () => {
         return runningTask || tasks[0] || null;
       });
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshKnowledgeBases();
-  }, []);
+  }, [refreshKnowledgeBases]);
 
   useEffect(() => {
     refreshDocuments(selectedKnowledgeBaseId);
     refreshImportTasks(selectedKnowledgeBaseId);
-  }, [selectedKnowledgeBaseId]);
+  }, [selectedKnowledgeBaseId, refreshDocuments, refreshImportTasks]);
 
   useEffect(() => {
     if (!selectedKnowledgeBaseId || !activeImportTask || !['PENDING', 'RUNNING'].includes(activeImportTask.status)) {
@@ -124,7 +122,7 @@ const KnowledgeBasePage = () => {
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [selectedKnowledgeBaseId, activeImportTask]);
+  }, [selectedKnowledgeBaseId, activeImportTask, refreshDocuments, refreshImportTasks, refreshKnowledgeBases]);
 
   const handleCreateKnowledgeBase = async () => {
     if (!newName.trim()) {

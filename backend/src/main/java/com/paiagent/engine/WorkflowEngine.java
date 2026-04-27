@@ -8,6 +8,7 @@ import com.paiagent.engine.execution.NodeExecutionAttempt;
 import com.paiagent.engine.execution.NodeExecutionException;
 import com.paiagent.engine.execution.NodeExecutionOutcome;
 import com.paiagent.engine.execution.NodeExecutionRunner;
+import com.paiagent.engine.execution.WorkflowExecutionContextHolder;
 import com.paiagent.engine.model.WorkflowConfig;
 import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.entity.ExecutionRecord;
@@ -31,6 +32,10 @@ import java.util.function.Consumer;
 @Slf4j
 @Service
 public class WorkflowEngine implements WorkflowExecutor {
+
+    private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
     
     @Autowired
     private DAGParser dagParser;
@@ -108,7 +113,16 @@ public class WorkflowEngine implements WorkflowExecutor {
                     eventCallback.accept(ExecutionEvent.nodeStart(node.getId(), node.getType()));
                 }
                 
-                Map<String, Object> nodeInput = buildNodeInput(node, inputData, incomingEdges, nodeOutputs, activeNodes, completedNodes, skippedNodes);
+                Map<String, Object> nodeInput = buildNodeInput(
+                        node,
+                        workflow,
+                        inputData,
+                        incomingEdges,
+                        nodeOutputs,
+                        activeNodes,
+                        completedNodes,
+                        skippedNodes
+                );
                 ExecutionResponse.NodeResult nodeResult = new ExecutionResponse.NodeResult();
                 nodeResult.setNodeId(node.getId());
                 nodeResult.setNodeName(node.getType());
@@ -226,8 +240,8 @@ public class WorkflowEngine implements WorkflowExecutor {
             eventCallback.accept(ExecutionEvent.workflowComplete(status, currentInput, duration));
         }
         
-        log.info("保存执行记录 - inputData: {}", record.getInputData());
-        log.info("保存执行记录 - outputData: {}", outputData);
+        log.debug("保存执行记录 - inputData: {}", record.getInputData());
+        log.debug("保存执行记录 - outputData: {}", outputData);
         record.setOutputData(outputData);
         record.setStatus(status);
         record.setNodeResults(JSON.toJSONString(nodeResults));
@@ -320,7 +334,9 @@ public class WorkflowEngine implements WorkflowExecutor {
         if (data != null) {
             cleanData.putAll(data);
         }
-        cleanData.remove("__nodeOutputs__");
+        cleanData.remove(NODE_OUTPUTS_CONTEXT_KEY);
+        cleanData.remove(EXECUTION_USER_ID_CONTEXT_KEY);
+        cleanData.remove(EXECUTION_ADMIN_CONTEXT_KEY);
         return cleanData;
     }
 
@@ -356,6 +372,7 @@ public class WorkflowEngine implements WorkflowExecutor {
 
     private Map<String, Object> buildNodeInput(
             WorkflowNode node,
+            Workflow workflow,
             String rawInput,
             Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges,
             Map<String, Map<String, Object>> nodeOutputs,
@@ -384,8 +401,20 @@ public class WorkflowEngine implements WorkflowExecutor {
             }
         }
 
-        input.put("__nodeOutputs__", nodeOutputs);
+        input.put(NODE_OUTPUTS_CONTEXT_KEY, nodeOutputs);
+        addExecutionContext(input, workflow);
         return input;
+    }
+
+    private void addExecutionContext(Map<String, Object> input, Workflow workflow) {
+        WorkflowExecutionContextHolder.WorkflowExecutionContext context = WorkflowExecutionContextHolder.get();
+        Long userId = context == null ? workflow.getOwnerId() : context.userId();
+        boolean admin = context != null && context.admin();
+
+        if (userId != null) {
+            input.put(EXECUTION_USER_ID_CONTEXT_KEY, userId);
+        }
+        input.put(EXECUTION_ADMIN_CONTEXT_KEY, admin);
     }
 
     private void activateTarget(

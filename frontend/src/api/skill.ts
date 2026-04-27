@@ -3,6 +3,7 @@ import api from '../utils/request';
 export interface SkillSummary {
   name: string;
   description: string;
+  referenceCount?: number;
 }
 
 export interface Skill {

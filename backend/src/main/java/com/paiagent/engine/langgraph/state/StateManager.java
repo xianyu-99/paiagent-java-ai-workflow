@@ -16,6 +16,9 @@ import java.util.Map;
 @Slf4j
 @Component
 public class StateManager {
+
+    private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
+    private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
     
     /**
      * 初始化工作流状态
@@ -92,7 +95,10 @@ public class StateManager {
         Map<String, Object> currentInput = 
             (Map<String, Object>) state.getOrDefault("currentInput", new HashMap<>());
         
-        return currentInput;
+        Map<String, Object> output = new HashMap<>(currentInput);
+        output.remove(EXECUTION_USER_ID_CONTEXT_KEY);
+        output.remove(EXECUTION_ADMIN_CONTEXT_KEY);
+        return output;
     }
     
     /**

@@ -73,8 +73,8 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
         log.info("{} 节点配置 - API: {}, Model: {}, Temperature: {}, Skill: {}",
                 provider.toUpperCase(Locale.ROOT), config.getApiUrl(), config.getModel(),
                 config.getTemperature(), config.getSkillName());
-        log.info("{} 输入参数配置: {}", provider.toUpperCase(Locale.ROOT), config.getInputParams());
-        log.info("{} 输入数据: {}", provider.toUpperCase(Locale.ROOT), input);
+        log.debug("{} 输入参数配置: {}", provider.toUpperCase(Locale.ROOT), summarizeForLog(config.getInputParams()));
+        log.debug("{} 输入数据: {}", provider.toUpperCase(Locale.ROOT), summarizeForLog(input));
 
         // 2. 获取关联的 Skill（如果有）
         Optional<Skill> skill = Optional.empty();
@@ -94,7 +94,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
                 // functions.add(new LoadSkillDetailFunction(skillRegistry));
                 // functions.add(new LoadSkillReferenceFunction(skillRegistry));
             } else {
-                log.warn("{} 未找到 Skill: {}", provider.toUpperCase(Locale.ROOT), config.getSkillName());
+                throw new IllegalArgumentException("Skill 不存在: " + config.getSkillName());
             }
         }
 
@@ -107,7 +107,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
                 config.getInputParams(),
                 input
         );
-        log.info("最终提示词: {}", userPrompt);
+        log.debug("最终提示词: {}", summarizeForLog(userPrompt));
 
         // 5. 创建 ChatClient（带或不带 Functions）
         ChatClient chatClient = chatClientFactory.createClientWithFunctions(
@@ -132,7 +132,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
             llmResponse = executeNormal(chatClient, systemPrompt, userPrompt);
         }
 
-        log.info("{} API响应: {}", provider.toUpperCase(Locale.ROOT), llmResponse.getContent());
+        log.debug("{} API响应: {}", provider.toUpperCase(Locale.ROOT), summarizeForLog(llmResponse.getContent()));
         log.info("{} Token统计: 输入={}, 输出={}, 总计={}",
                 provider.toUpperCase(Locale.ROOT),
                 llmResponse.getInputTokens(),
@@ -141,7 +141,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
 
         // 7. 构建输出
         Map<String, Object> output = buildOutput(llmResponse, config.getOutputParams());
-        log.info("{} 节点输出: {}", provider.toUpperCase(Locale.ROOT), output);
+        log.debug("{} 节点输出: {}", provider.toUpperCase(Locale.ROOT), summarizeForLog(output));
 
         return output;
     }
@@ -448,6 +448,19 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
      */
     private String trimString(Object value) {
         return value != null ? value.toString().trim() : null;
+    }
+
+    private String summarizeForLog(Object value) {
+        if (value == null) {
+            return "null";
+        }
+
+        String text = String.valueOf(value);
+        int maxLength = 1000;
+        if (text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "...(truncated)";
     }
     
     @Override
