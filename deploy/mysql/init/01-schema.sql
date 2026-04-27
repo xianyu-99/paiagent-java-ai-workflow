@@ -1,5 +1,6 @@
 CREATE DATABASE IF NOT EXISTS paiagent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE paiagent;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS app_user (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -158,7 +159,7 @@ CREATE TABLE IF NOT EXISTS llm_global_config (
     INDEX idx_is_default (is_default)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema) VALUES
+INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema) VALUES
 ('input', '输入', 'IO', '📥',
  '{"type":"object","properties":{}}',
  '{"type":"object","properties":{"input":{"type":"string"}}}',
@@ -167,37 +168,13 @@ INSERT IGNORE INTO node_definition (node_type, display_name, category, icon, inp
  '{"type":"object","properties":{"input":{"type":"string"}}}',
  '{"type":"object","properties":{"output":{"type":"string"}}}',
  '{"type":"object","properties":{}}'),
-('llm', 'LLM', 'LLM', '🤖',
+('llm', '大模型', 'LLM', '🤖',
  '{"type":"object","properties":{"input":{"type":"string"}}}',
  '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"apiKey":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
-('openai', 'OpenAI', 'LLM', '🤖',
- '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"gpt-4o-mini"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
-('deepseek', 'DeepSeek', 'LLM', '🧠',
- '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"deepseek-chat"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
-('qwen', '通义千问', 'LLM', '🌟',
- '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen-turbo"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
-('zhipu', '智谱 GLM', 'LLM', '🧩',
- '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"glm-4"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
-('step', 'Step', 'LLM', '🟆',
- '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
-('ai_ping', 'AI Ping', 'LLM', '📡',
- '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7}}}'),
+ '{"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"apiKey":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7},"maxTokens":{"type":"number","default":1000}}}'),
 ('tts', '超拟人音频合成', 'TOOL', '🔊',
  '{"type":"object","properties":{"text":{"type":"string"}}}',
- '{"type":"object","properties":{"audioUrl":{"type":"string"},"fileName":{"type":"string"},"output":{"type":"string"}}}',
+ '{"type":"object","properties":{"audioUrl":{"type":"string"},"fileName":{"type":"string"},"output":{"type":"string"},"chunks":{"type":"number"}}}',
  '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen3-tts-flash"},"voice":{"type":"string","default":"Cherry"},"languageType":{"type":"string","default":"Auto"}}}'),
 ('condition', '条件分支', 'FLOW', '🔀',
  '{"type":"object","properties":{"input":{"type":"string"},"output":{"type":"string"}}}',
@@ -205,5 +182,14 @@ INSERT IGNORE INTO node_definition (node_type, display_name, category, icon, inp
  '{"type":"object","properties":{"leftType":{"type":"string","default":"reference"},"leftReference":{"type":"string"},"leftValue":{"type":"string"},"operator":{"type":"string","default":"equals"},"rightValue":{"type":"string"},"caseSensitive":{"type":"boolean","default":false}}}'),
 ('rag', '知识库问答', 'KNOWLEDGE', '📚',
  '{"type":"object","properties":{"question":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"}}}',
- '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"configId":{"type":"number"},"prompt":{"type":"string"}}}');
+ '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"},"retrievedCount":{"type":"number"}}}',
+ '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"contextWindow":{"type":"number","default":1},"contextMaxChars":{"type":"number","default":1800},"configId":{"type":"number"},"prompt":{"type":"string"}}}')
+ON DUPLICATE KEY UPDATE
+    display_name = VALUES(display_name),
+    category = VALUES(category),
+    icon = VALUES(icon),
+    input_schema = VALUES(input_schema),
+    output_schema = VALUES(output_schema),
+    config_schema = VALUES(config_schema),
+    deleted = 0,
+    updated_at = CURRENT_TIMESTAMP;

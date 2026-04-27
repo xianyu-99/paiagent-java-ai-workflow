@@ -25,6 +25,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         migrateKnowledgeChunkEmbeddingMetadata();
         migrateKnowledgeChunkSourceMetadata();
         createKnowledgeImportTaskTable();
+        upsertCoreNodeDefinitions();
+        hideLegacyProviderNodeDefinitions();
         upsertTtsNodeDefinition();
         upsertRagNodeDefinition();
     }
@@ -198,9 +200,79 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     input_schema = VALUES(input_schema),
                     output_schema = VALUES(output_schema),
                     config_schema = VALUES(config_schema),
+                    deleted = 0,
                     updated_at = CURRENT_TIMESTAMP
                 """);
         log.info("RAG 知识库表与节点定义迁移完成");
+    }
+
+    private void upsertCoreNodeDefinitions() {
+        upsertNodeDefinition(
+                "input",
+                "输入",
+                "IO",
+                "📥",
+                "{\"type\":\"object\",\"properties\":{}}",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"defaultValue\":{\"type\":\"string\"}}}"
+        );
+        upsertNodeDefinition(
+                "output",
+                "输出",
+                "IO",
+                "📤",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{}}"
+        );
+        upsertNodeDefinition(
+                "llm",
+                "大模型",
+                "LLM",
+                "🤖",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"tokens\":{\"type\":\"number\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"},\"temperature\":{\"type\":\"number\",\"default\":0.7},\"maxTokens\":{\"type\":\"number\",\"default\":1000}}}"
+        );
+        upsertNodeDefinition(
+                "condition",
+                "条件分支",
+                "FLOW",
+                "🔀",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"conditionResult\":{\"type\":\"boolean\"},\"selectedBranch\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"leftType\":{\"type\":\"string\",\"default\":\"reference\"},\"leftReference\":{\"type\":\"string\"},\"leftValue\":{\"type\":\"string\"},\"operator\":{\"type\":\"string\",\"default\":\"equals\"},\"rightValue\":{\"type\":\"string\"},\"caseSensitive\":{\"type\":\"boolean\",\"default\":false}}}"
+        );
+    }
+
+    private void hideLegacyProviderNodeDefinitions() {
+        jdbcTemplate.update("""
+                UPDATE node_definition
+                SET deleted = 1, updated_at = CURRENT_TIMESTAMP
+                WHERE node_type IN ('openai', 'deepseek', 'qwen', 'zhipu', 'step', 'ai_ping')
+                """);
+    }
+
+    private void upsertNodeDefinition(String nodeType,
+                                      String displayName,
+                                      String category,
+                                      String icon,
+                                      String inputSchema,
+                                      String outputSchema,
+                                      String configSchema) {
+        jdbcTemplate.update("""
+                INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    display_name = VALUES(display_name),
+                    category = VALUES(category),
+                    icon = VALUES(icon),
+                    input_schema = VALUES(input_schema),
+                    output_schema = VALUES(output_schema),
+                    config_schema = VALUES(config_schema),
+                    deleted = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                """, nodeType, displayName, category, icon, inputSchema, outputSchema, configSchema);
     }
 
     private void upsertTtsNodeDefinition() {
@@ -222,6 +294,7 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     input_schema = VALUES(input_schema),
                     output_schema = VALUES(output_schema),
                     config_schema = VALUES(config_schema),
+                    deleted = 0,
                     updated_at = CURRENT_TIMESTAMP
                 """);
     }

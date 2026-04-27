@@ -8,24 +8,38 @@ import org.springframework.stereotype.Service;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 节点定义服务
  */
 @Service
 public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, NodeDefinition> {
+
+    private static final Set<String> LEGACY_PROVIDER_NODE_TYPES = Set.of(
+            "openai",
+            "deepseek",
+            "qwen",
+            "zhipu",
+            "step",
+            "ai_ping"
+    );
     
     /**
      * 查询所有节点定义
      */
     public List<NodeDefinition> listAllNodeDefinitions() {
         Map<String, NodeDefinition> nodeDefinitionMap = new LinkedHashMap<>();
-        this.list().forEach(node -> nodeDefinitionMap.put(node.getNodeType(), node));
+        this.list().stream()
+                .filter(node -> !LEGACY_PROVIDER_NODE_TYPES.contains(node.getNodeType()))
+                .forEach(node -> nodeDefinitionMap.put(node.getNodeType(), node));
 
-        nodeDefinitionMap.putIfAbsent("llm", createGenericLlmNodeDefinition());
-        nodeDefinitionMap.putIfAbsent("condition", createConditionNodeDefinition());
-        nodeDefinitionMap.putIfAbsent("tts", createTtsNodeDefinition());
-        nodeDefinitionMap.putIfAbsent("rag", createRagNodeDefinition());
+        nodeDefinitionMap.put("input", createInputNodeDefinition());
+        nodeDefinitionMap.put("output", createOutputNodeDefinition());
+        nodeDefinitionMap.put("llm", createGenericLlmNodeDefinition());
+        nodeDefinitionMap.put("condition", createConditionNodeDefinition());
+        nodeDefinitionMap.put("tts", createTtsNodeDefinition());
+        nodeDefinitionMap.put("rag", createRagNodeDefinition());
 
         return nodeDefinitionMap.values().stream()
                 .filter(node -> node.getDeleted() == null || node.getDeleted() == 0)
@@ -36,6 +50,12 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
      * 根据节点类型查询
      */
     public NodeDefinition getByNodeType(String nodeType) {
+        if ("input".equals(nodeType)) {
+            return createInputNodeDefinition();
+        }
+        if ("output".equals(nodeType)) {
+            return createOutputNodeDefinition();
+        }
         if ("llm".equals(nodeType)) {
             return createGenericLlmNodeDefinition();
         }
@@ -52,6 +72,30 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         return this.lambdaQuery()
                 .eq(NodeDefinition::getNodeType, nodeType)
                 .one();
+    }
+
+    private NodeDefinition createInputNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("input");
+        nodeDefinition.setDisplayName("输入");
+        nodeDefinition.setCategory("IO");
+        nodeDefinition.setIcon("📥");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"defaultValue\":{\"type\":\"string\"}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createOutputNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("output");
+        nodeDefinition.setDisplayName("输出");
+        nodeDefinition.setCategory("IO");
+        nodeDefinition.setIcon("📤");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{}}");
+        return nodeDefinition;
     }
 
     private NodeDefinition createGenericLlmNodeDefinition() {

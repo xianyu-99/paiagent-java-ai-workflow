@@ -4,6 +4,7 @@ CREATE DATABASE IF NOT EXISTS paiagent DEFAULT CHARACTER SET utf8mb4 COLLATE utf
 CREATE DATABASE IF NOT EXISTS paiagent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 USE paiagent;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- app user table
 CREATE TABLE IF NOT EXISTS app_user (
@@ -165,26 +166,11 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
  '{"type": "object", "properties": {"output": {"type": "string"}}}',
  '{"type": "object", "properties": {}}'),
 
-('openai', 'OpenAI', 'LLM', '🤖', 
+('llm', '大模型', 'LLM', '🤖',
  '{"type": "object", "properties": {"input": {"type": "string"}}}',
  '{"type": "object", "properties": {"output": {"type": "string"}, "tokens": {"type": "number"}}}',
- '{"type": "object", "properties": {"apiKey": {"type": "string"}, "model": {"type": "string", "default": "gpt-3.5-turbo"}, "prompt": {"type": "string"}, "temperature": {"type": "number", "default": 0.7}, "maxTokens": {"type": "number", "default": 1000}}}'),
- 
-('deepseek', 'DeepSeek', 'LLM', '🧠',
- '{"type": "object", "properties": {"input": {"type": "string"}}}',
- '{"type": "object", "properties": {"output": {"type": "string"}, "tokens": {"type": "number"}}}',
- '{"type": "object", "properties": {"apiKey": {"type": "string"}, "model": {"type": "string", "default": "deepseek-chat"}, "prompt": {"type": "string"}, "temperature": {"type": "number", "default": 0.7}, "maxTokens": {"type": "number", "default": 1000}}}'),
- 
-('qwen', '通义千问', 'LLM', '🌟',
- '{"type": "object", "properties": {"input": {"type": "string"}}}',
- '{"type": "object", "properties": {"output": {"type": "string"}, "tokens": {"type": "number"}}}',
- '{"type": "object", "properties": {"apiKey": {"type": "string"}, "model": {"type": "string", "default": "qwen-turbo"}, "prompt": {"type": "string"}, "temperature": {"type": "number", "default": 0.7}, "maxTokens": {"type": "number", "default": 1000}}}'),
+ '{"type": "object", "properties": {"provider": {"type": "string"}, "configId": {"type": "number"}, "apiKey": {"type": "string"}, "model": {"type": "string"}, "prompt": {"type": "string"}, "temperature": {"type": "number", "default": 0.7}, "maxTokens": {"type": "number", "default": 1000}}}'),
 
-('step', 'Step', 'LLM', '🟆',
- '{"type": "object", "properties": {"input": {"type": "string"}}}',
- '{"type": "object", "properties": {"output": {"type": "string"}, "tokens": {"type": "number"}}}',
- '{"type": "object", "properties": {"apiKey": {"type": "string"}, "model": {"type": "string", "default": "claude-3-5-sonnet-20241022"}, "prompt": {"type": "string"}, "temperature": {"type": "number", "default": 0.7}, "maxTokens": {"type": "number", "default": 1000}}}'),
- 
 ('tts', '超拟人音频合成', 'TOOL', '🔊',
  '{"type": "object", "properties": {"text": {"type": "string"}}}',
  '{"type": "object", "properties": {"audioUrl": {"type": "string"}, "fileName": {"type": "string"}, "output": {"type": "string"}, "chunks": {"type": "number"}}}',
@@ -199,7 +185,15 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
  '{"type": "object", "properties": {"question": {"type": "string"}}}',
  '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "retrievedChunks": {"type": "array"}, "retrievedCount": {"type": "number"}}}',
  '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "contextWindow": {"type": "number", "default": 1}, "contextMaxChars": {"type": "number", "default": 1800}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
-ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
+ON DUPLICATE KEY UPDATE
+    display_name = VALUES(display_name),
+    category = VALUES(category),
+    icon = VALUES(icon),
+    input_schema = VALUES(input_schema),
+    output_schema = VALUES(output_schema),
+    config_schema = VALUES(config_schema),
+    deleted = 0,
+    updated_at = CURRENT_TIMESTAMP;
 
 -- 全局 LLM 配置表
 CREATE TABLE IF NOT EXISTS llm_global_config (
