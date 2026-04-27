@@ -106,7 +106,13 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 ('tts', '超拟人音频合成', 'TOOL', '🔊',
  '{"type": "object", "properties": {"text": {"type": "string"}}}',
  '{"type": "object", "properties": {"audioUrl": {"type": "string"}, "duration": {"type": "number"}, "fileSize": {"type": "number"}}}',
- '{"type": "object", "properties": {"apiKey": {"type": "string"}, "voice": {"type": "string", "default": "female"}, "speed": {"type": "number", "default": 1.0}, "volume": {"type": "number", "default": 80}}}');
+ '{"type": "object", "properties": {"apiKey": {"type": "string"}, "voice": {"type": "string", "default": "female"}, "speed": {"type": "number", "default": 1.0}, "volume": {"type": "number", "default": 80}}}'),
+
+('condition', '条件分支', 'FLOW', '🔀',
+ '{"type": "object", "properties": {"input": {"type": "string"}, "output": {"type": "string"}}}',
+ '{"type": "object", "properties": {"conditionResult": {"type": "boolean"}, "selectedBranch": {"type": "string"}, "output": {"type": "string"}}}',
+ '{"type": "object", "properties": {"leftType": {"type": "string", "default": "reference"}, "leftReference": {"type": "string"}, "leftValue": {"type": "string"}, "operator": {"type": "string", "default": "equals"}, "rightValue": {"type": "string"}, "caseSensitive": {"type": "boolean", "default": false}}}')
+ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
 
 -- 全局 LLM 配置表
 CREATE TABLE IF NOT EXISTS llm_global_config (

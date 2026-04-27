@@ -23,6 +23,7 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         this.list().forEach(node -> nodeDefinitionMap.put(node.getNodeType(), node));
 
         nodeDefinitionMap.putIfAbsent("llm", createGenericLlmNodeDefinition());
+        nodeDefinitionMap.putIfAbsent("condition", createConditionNodeDefinition());
 
         return nodeDefinitionMap.values().stream()
                 .filter(node -> node.getDeleted() == null || node.getDeleted() == 0)
@@ -35,6 +36,9 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
     public NodeDefinition getByNodeType(String nodeType) {
         if ("llm".equals(nodeType)) {
             return createGenericLlmNodeDefinition();
+        }
+        if ("condition".equals(nodeType)) {
+            return createConditionNodeDefinition();
         }
 
         return this.lambdaQuery()
@@ -51,6 +55,18 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setInputSchema("{\"type\": \"object\", \"properties\": {\"input\": {\"type\": \"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\": \"object\", \"properties\": {\"output\": {\"type\": \"string\"}, \"tokens\": {\"type\": \"number\"}}}");
         nodeDefinition.setConfigSchema("{\"type\": \"object\", \"properties\": {\"provider\": {\"type\": \"string\"}, \"configId\": {\"type\": \"number\"}, \"apiKey\": {\"type\": \"string\"}, \"model\": {\"type\": \"string\"}, \"prompt\": {\"type\": \"string\"}, \"temperature\": {\"type\": \"number\", \"default\": 0.7}, \"maxTokens\": {\"type\": \"number\", \"default\": 1000}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createConditionNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("condition");
+        nodeDefinition.setDisplayName("条件分支");
+        nodeDefinition.setCategory("FLOW");
+        nodeDefinition.setIcon("🔀");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"conditionResult\":{\"type\":\"boolean\"},\"selectedBranch\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"leftType\":{\"type\":\"string\",\"default\":\"reference\"},\"leftReference\":{\"type\":\"string\"},\"leftValue\":{\"type\":\"string\"},\"operator\":{\"type\":\"string\",\"default\":\"equals\"},\"rightValue\":{\"type\":\"string\"},\"caseSensitive\":{\"type\":\"boolean\",\"default\":false}}}");
         return nodeDefinition;
     }
 }

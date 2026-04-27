@@ -38,6 +38,7 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
 
   // 按分类分组节点
   const llmNodes = nodeTypes.filter((node) => node.category === 'LLM');
+  const flowNodes = nodeTypes.filter((node) => node.category === 'FLOW');
   const toolNodes = nodeTypes.filter((node) => node.category === 'TOOL');
 
   const renderNodeItem = (node: NodeDefinition) => (
@@ -62,6 +63,19 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
         <div>
           {llmNodes.length > 0 ? (
             llmNodes.map(renderNodeItem)
+          ) : (
+            <div className="text-gray-400 text-center py-4">暂无节点</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'flow',
+      label: <span className="font-semibold">🔀 流程控制</span>,
+      children: (
+        <div>
+          {flowNodes.length > 0 ? (
+            flowNodes.map(renderNodeItem)
           ) : (
             <div className="text-gray-400 text-center py-4">暂无节点</div>
           )}
@@ -94,7 +108,7 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
         ) : (
           <>
             <Collapse
-              defaultActiveKey={['llm', 'tool']}
+              defaultActiveKey={['llm', 'flow', 'tool']}
               ghost
               items={items}
               bordered={false}

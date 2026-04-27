@@ -2,12 +2,15 @@ import {
     Background,
     Connection,
     Controls,
+    Handle,
     MarkerType,
     MiniMap,
     Node,
+    NodeProps,
     OnConnect,
     OnEdgesChange,
     OnNodesChange,
+    Position,
     ReactFlow,
     ReactFlowProvider,
     addEdge,
@@ -22,6 +25,39 @@ import { useWorkflowStore } from '../store/workflowStore';
 interface FlowCanvasProps {
   onNodeClick: (node: Node) => void;
 }
+
+const ConditionNode = ({ data, selected }: NodeProps) => {
+  const label = typeof data?.label === 'string' ? data.label : '条件分支';
+
+  return (
+    <div className={`relative px-4 py-3 rounded-lg border-2 bg-white shadow-sm min-w-[150px] ${selected ? 'border-blue-500' : 'border-orange-300'}`}>
+      <Handle type="target" position={Position.Top} />
+      <div className="text-center">
+        <div className="text-lg">🔀</div>
+        <div className="font-semibold text-gray-800">{label}</div>
+        <div className="text-xs text-gray-500 mt-1">true / false</div>
+      </div>
+      <Handle
+        id="true"
+        type="source"
+        position={Position.Right}
+        style={{ top: '38%', background: '#16a34a' }}
+      />
+      <Handle
+        id="false"
+        type="source"
+        position={Position.Right}
+        style={{ top: '72%', background: '#dc2626' }}
+      />
+      <div className="absolute -right-12 top-[28%] text-xs text-green-600 bg-white px-1">true</div>
+      <div className="absolute -right-12 top-[62%] text-xs text-red-600 bg-white px-1">false</div>
+    </div>
+  );
+};
+
+const nodeTypes = {
+  condition: ConditionNode,
+};
 
 const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
   const { nodes: storeNodes, edges: storeEdges, setNodes: setStoreNodes, setEdges: setStoreEdges } = useWorkflowStore();
@@ -110,9 +146,21 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
 
       const newNode: Node = {
         id: `${type}-${Date.now()}`,
-        type: 'default',
+        type: type === 'condition' ? 'condition' : 'default',
         position,
-        data: { label: label || type, type },
+        data: {
+          label: label || type,
+          type,
+          ...(type === 'condition'
+            ? {
+                leftType: 'reference',
+                leftReference: 'input-default.user_input',
+                operator: 'contains',
+                rightValue: '',
+                caseSensitive: false,
+              }
+            : {}),
+        },
       };
 
       setNodes((nds) => {
@@ -147,6 +195,7 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
         onDrop={onDrop}
         onDragOver={onDragOver}
         onNodeClick={handleNodeClick}
+        nodeTypes={nodeTypes}
         defaultEdgeOptions={{
           markerEnd: {
             type: MarkerType.ArrowClosed,

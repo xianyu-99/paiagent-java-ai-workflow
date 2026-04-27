@@ -55,6 +55,15 @@ interface TtsOutputParam {
   value: string;
 }
 
+interface ConditionConfig {
+  leftType: 'input' | 'reference';
+  leftValue: string;
+  leftReference?: string;
+  operator: string;
+  rightValue: string;
+  caseSensitive: boolean;
+}
+
 interface WorkflowCanvasData {
   nodes?: Node[];
   edges?: Edge[];
@@ -106,6 +115,14 @@ const EditorPage = () => {
   });
   const [ttsInputParams, setTtsInputParams] = useState<TtsInputParam[]>([]);
   const [ttsOutputParams, setTtsOutputParams] = useState<TtsOutputParam[]>([]);
+  const [conditionConfig, setConditionConfig] = useState<ConditionConfig>({
+    leftType: 'reference',
+    leftValue: '',
+    leftReference: 'input-default.user_input',
+    operator: 'contains',
+    rightValue: '',
+    caseSensitive: false
+  });
 
   // 自动保存定时器
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -179,6 +196,15 @@ const EditorPage = () => {
       });
       setTtsInputParams((node.data?.inputParams as TtsInputParam[]) || []);
       setTtsOutputParams((node.data?.outputParams as TtsOutputParam[]) || []);
+    } else if (node.data?.type === 'condition') {
+      setConditionConfig({
+        leftType: (node.data?.leftType as 'input' | 'reference') || 'reference',
+        leftValue: (node.data?.leftValue as string) || '',
+        leftReference: (node.data?.leftReference as string) || 'input-default.user_input',
+        operator: (node.data?.operator as string) || 'contains',
+        rightValue: (node.data?.rightValue as string) || '',
+        caseSensitive: Boolean(node.data?.caseSensitive)
+      });
     }
   };
 
@@ -388,6 +414,8 @@ const EditorPage = () => {
         return ['output', 'tokens'];
       case 'tts':
         return ['audioUrl', 'fileName', 'output'];
+      case 'condition':
+        return ['conditionResult', 'selectedBranch', 'output'];
       default:
         return ['output'];
     }
@@ -723,6 +751,29 @@ const EditorPage = () => {
     setTtsOutputParams(newParams);
   };
 
+  const handleSaveConditionConfig = () => {
+    if (!selectedNode) return;
+
+    if (conditionConfig.leftType === 'reference' && !conditionConfig.leftReference) {
+      message.warning('请选择左侧引用参数');
+      return;
+    }
+    if (conditionConfig.leftType === 'input' && !conditionConfig.leftValue) {
+      message.warning('请填写左侧固定值');
+      return;
+    }
+    if (!['empty', 'not_empty'].includes(conditionConfig.operator) && !conditionConfig.rightValue) {
+      message.warning('请填写右侧比较值');
+      return;
+    }
+
+    useWorkflowStore.getState().updateNode(selectedNode.id, {
+      ...selectedNode.data,
+      ...conditionConfig,
+    });
+    message.success('条件配置保存成功');
+  };
+
   // 添加 LLM 输出参数
   const handleAddLlmOutputParam = () => {
     setLlmOutputParams([...llmOutputParams, { name: '', type: 'string', description: '' }]);
@@ -869,6 +920,36 @@ const EditorPage = () => {
       }
     };
   }, [ttsConfig, ttsInputParams, ttsOutputParams, selectedNode]);
+
+  // 自动保存条件节点配置
+  useEffect(() => {
+    if (!selectedNode || selectedNode.data?.type !== 'condition') return;
+
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = setTimeout(() => {
+      const hasLeft = conditionConfig.leftType === 'reference'
+        ? !!conditionConfig.leftReference
+        : !!conditionConfig.leftValue;
+      const hasRight = ['empty', 'not_empty'].includes(conditionConfig.operator) || !!conditionConfig.rightValue;
+
+      if (!hasLeft || !hasRight) return;
+
+      useWorkflowStore.getState().updateNode(selectedNode.id, {
+        ...selectedNode.data,
+        ...conditionConfig,
+      });
+      console.log('条件节点配置已自动保存');
+    }, 500);
+
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [conditionConfig, selectedNode]);
 
   const selectedNodeType = String(selectedNode?.data?.type || '');
   const isGenericLlmNode = selectedNodeType === 'llm';
@@ -1534,11 +1615,103 @@ const EditorPage = () => {
                   </Form>
                 )}
 
+                {/* 条件分支节点配置 */}
+                {selectedNode.data?.type === 'condition' && (
+                  <Form layout="vertical" className="mt-4">
+                    <div className="mb-4 p-3 bg-orange-50 rounded text-sm text-orange-700">
+                      条件成立时走 <strong>true</strong> 出口，不成立时走 <strong>false</strong> 出口。
+                    </div>
+
+                    <Form.Item label="左侧值来源" required>
+                      <Select
+                        value={conditionConfig.leftType}
+                        onChange={(value: 'input' | 'reference') => setConditionConfig({ ...conditionConfig, leftType: value })}
+                      >
+                        <Select.Option value="reference">引用上游参数</Select.Option>
+                        <Select.Option value="input">固定值</Select.Option>
+                      </Select>
+                    </Form.Item>
+
+                    {conditionConfig.leftType === 'reference' ? (
+                      <Form.Item label="左侧引用参数" required>
+                        <Select
+                          placeholder="选择要判断的上游输出"
+                          value={conditionConfig.leftReference}
+                          onChange={(value) => setConditionConfig({ ...conditionConfig, leftReference: value })}
+                          style={{ width: '100%' }}
+                        >
+                          {getReferenceableParams().map((p) => (
+                            <Select.Option key={p.value} value={p.value}>
+                              {p.label}
+                            </Select.Option>
+                          ))}
+                        </Select>
+                      </Form.Item>
+                    ) : (
+                      <Form.Item label="左侧固定值" required>
+                        <Input
+                          placeholder="输入左侧比较值"
+                          value={conditionConfig.leftValue}
+                          onChange={(e) => setConditionConfig({ ...conditionConfig, leftValue: e.target.value })}
+                        />
+                      </Form.Item>
+                    )}
+
+                    <Form.Item label="判断条件" required>
+                      <Select
+                        value={conditionConfig.operator}
+                        onChange={(value) => setConditionConfig({ ...conditionConfig, operator: value })}
+                      >
+                        <Select.Option value="equals">等于</Select.Option>
+                        <Select.Option value="not_equals">不等于</Select.Option>
+                        <Select.Option value="contains">包含</Select.Option>
+                        <Select.Option value="not_contains">不包含</Select.Option>
+                        <Select.Option value="starts_with">以此开头</Select.Option>
+                        <Select.Option value="ends_with">以此结尾</Select.Option>
+                        <Select.Option value="empty">为空</Select.Option>
+                        <Select.Option value="not_empty">不为空</Select.Option>
+                        <Select.Option value="gt">大于</Select.Option>
+                        <Select.Option value="gte">大于等于</Select.Option>
+                        <Select.Option value="lt">小于</Select.Option>
+                        <Select.Option value="lte">小于等于</Select.Option>
+                      </Select>
+                    </Form.Item>
+
+                    {!['empty', 'not_empty'].includes(conditionConfig.operator) && (
+                      <Form.Item label="右侧比较值" required>
+                        <Input
+                          placeholder="输入右侧比较值"
+                          value={conditionConfig.rightValue}
+                          onChange={(e) => setConditionConfig({ ...conditionConfig, rightValue: e.target.value })}
+                        />
+                      </Form.Item>
+                    )}
+
+                    <Form.Item>
+                      <Checkbox
+                        checked={conditionConfig.caseSensitive}
+                        onChange={(e) => setConditionConfig({ ...conditionConfig, caseSensitive: e.target.checked })}
+                      >
+                        区分大小写
+                      </Checkbox>
+                    </Form.Item>
+
+                    <div className="mb-4 text-xs text-gray-500 bg-gray-50 rounded p-3">
+                      连接方式：从条件节点右侧绿色 handle 连 true 分支，红色 handle 连 false 分支。
+                    </div>
+
+                    <Button type="primary" block onClick={handleSaveConditionConfig}>
+                      保存配置
+                    </Button>
+                  </Form>
+                )}
+
                 {/* 其他节点配置 */}
                 {selectedNode.data?.type !== 'input' &&
                  selectedNode.data?.type !== 'output' &&
                  !isLlmNodeType(selectedNodeType) &&
-                 selectedNode.data?.type !== 'tts' && (
+                 selectedNode.data?.type !== 'tts' &&
+                 selectedNode.data?.type !== 'condition' && (
                   <div className="mt-4 text-center text-gray-400 text-sm">
                     该节点暂无可配置项
                   </div>

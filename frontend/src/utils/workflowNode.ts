@@ -10,6 +10,8 @@ const getFallbackLabel = (nodeType: string, nodeId: string) => {
       return '输出';
     case 'tts':
       return '语音合成';
+    case 'condition':
+      return '条件分支';
     case 'llm':
       return '大模型';
     default:
@@ -31,7 +33,7 @@ export const normalizeWorkflowNode = (node: Node): Node => {
 
   return {
     ...node,
-    type: REACT_FLOW_NODE_TYPE,
+    type: workflowNodeType === 'condition' ? 'condition' : REACT_FLOW_NODE_TYPE,
     data: {
       ...node.data,
       type: workflowNodeType,

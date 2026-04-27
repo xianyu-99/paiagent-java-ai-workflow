@@ -19,9 +19,13 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 import java.util.function.Consumer;
 
 @Slf4j
@@ -69,22 +73,50 @@ public class WorkflowEngine implements WorkflowExecutor {
 
             WorkflowConfig config = JSON.parseObject(workflow.getFlowData(), WorkflowConfig.class);
             List<WorkflowNode> sortedNodes = dagParser.parse(config);
-            
+            Map<String, WorkflowNode> nodeMap = buildNodeMap(sortedNodes);
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges = buildIncomingEdges(config);
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> outgoingEdges = buildOutgoingEdges(config);
+
+            Queue<String> executionQueue = new LinkedList<>();
+            Set<String> activeNodes = new HashSet<>();
+            Set<String> scheduledNodes = new HashSet<>();
+            Set<String> completedNodes = new HashSet<>();
+            Set<String> skippedNodes = new HashSet<>();
+
             for (WorkflowNode node : sortedNodes) {
+                if (incomingEdges.getOrDefault(node.getId(), List.of()).isEmpty()) {
+                    activeNodes.add(node.getId());
+                    scheduledNodes.add(node.getId());
+                    executionQueue.offer(node.getId());
+                }
+            }
+
+            if (executionQueue.isEmpty() && !sortedNodes.isEmpty()) {
+                throw new IllegalStateException("工作流缺少起始节点");
+            }
+
+            while (!executionQueue.isEmpty()) {
+                String nodeId = executionQueue.poll();
+                WorkflowNode node = nodeMap.get(nodeId);
+                if (node == null || completedNodes.contains(nodeId) || skippedNodes.contains(nodeId)) {
+                    continue;
+                }
+
                 long nodeStartTime = System.currentTimeMillis();
                 
                 if (eventCallback != null) {
                     eventCallback.accept(ExecutionEvent.nodeStart(node.getId(), node.getType()));
                 }
                 
+                Map<String, Object> nodeInput = buildNodeInput(node, inputData, incomingEdges, nodeOutputs, activeNodes, completedNodes, skippedNodes);
                 ExecutionResponse.NodeResult nodeResult = new ExecutionResponse.NodeResult();
                 nodeResult.setNodeId(node.getId());
                 nodeResult.setNodeName(node.getType());
-                nodeResult.setInput(JSON.toJSONString(currentInput));
+                nodeResult.setInput(JSON.toJSONString(removeInternalContext(nodeInput)));
                 
                 try {
-                    NodeExecutionOutcome outcome = nodeExecutionRunner.execute(node, currentInput, eventCallback);
-                    Map<String, Object> output = outcome.getOutput();
+                    NodeExecutionOutcome outcome = nodeExecutionRunner.execute(node, nodeInput, eventCallback);
+                    Map<String, Object> output = removeInternalContext(outcome.getOutput());
 
                     totalRetryCount += outcome.getRetryCount();
                     totalTimeoutCount += countTimeouts(outcome.getAttempts());
@@ -105,7 +137,7 @@ public class WorkflowEngine implements WorkflowExecutor {
                     
                     if (eventCallback != null) {
                         Map<String, Object> eventData = new HashMap<>();
-                        eventData.put("input", currentInput);
+                        eventData.put("input", removeInternalContext(nodeInput));
                         eventData.put("output", output);
                         eventData.put("duration", nodeDuration);
                         eventData.put("attempts", outcome.getAttempts().size());
@@ -115,6 +147,24 @@ public class WorkflowEngine implements WorkflowExecutor {
                     }
                     
                     currentInput = output;
+                    completedNodes.add(nodeId);
+
+                    List<com.paiagent.engine.model.WorkflowEdge> outgoing = outgoingEdges.getOrDefault(nodeId, List.of());
+                    if ("condition".equals(node.getType())) {
+                        List<com.paiagent.engine.model.WorkflowEdge> selectedEdges = selectConditionEdges(outgoing, resolveSelectedBranch(output));
+                        for (com.paiagent.engine.model.WorkflowEdge edge : selectedEdges) {
+                            activateTarget(edge.getTarget(), activeNodes, scheduledNodes, completedNodes, skippedNodes, incomingEdges, executionQueue);
+                        }
+                        for (com.paiagent.engine.model.WorkflowEdge edge : outgoing) {
+                            if (!selectedEdges.contains(edge)) {
+                                skipInactiveBranch(edge.getTarget(), activeNodes, completedNodes, skippedNodes, incomingEdges, outgoingEdges);
+                            }
+                        }
+                    } else {
+                        for (com.paiagent.engine.model.WorkflowEdge edge : outgoing) {
+                            activateTarget(edge.getTarget(), activeNodes, scheduledNodes, completedNodes, skippedNodes, incomingEdges, executionQueue);
+                        }
+                    }
                     
                 } catch (NodeExecutionException e) {
                     log.error("节点执行失败: {}", node.getId(), e);
@@ -263,5 +313,186 @@ public class WorkflowEngine implements WorkflowExecutor {
         logEntry.put("message", e.getMessage());
         logEntry.put("timestamp", System.currentTimeMillis());
         return logEntry;
+    }
+
+    private Map<String, Object> removeInternalContext(Map<String, Object> data) {
+        Map<String, Object> cleanData = new HashMap<>();
+        if (data != null) {
+            cleanData.putAll(data);
+        }
+        cleanData.remove("__nodeOutputs__");
+        return cleanData;
+    }
+
+    private Map<String, WorkflowNode> buildNodeMap(List<WorkflowNode> nodes) {
+        Map<String, WorkflowNode> nodeMap = new HashMap<>();
+        for (WorkflowNode node : nodes) {
+            nodeMap.put(node.getId(), node);
+        }
+        return nodeMap;
+    }
+
+    private Map<String, List<com.paiagent.engine.model.WorkflowEdge>> buildIncomingEdges(WorkflowConfig config) {
+        Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incoming = new HashMap<>();
+        for (WorkflowNode node : config.getNodes()) {
+            incoming.put(node.getId(), new ArrayList<>());
+        }
+        for (com.paiagent.engine.model.WorkflowEdge edge : config.getEdges()) {
+            incoming.computeIfAbsent(edge.getTarget(), key -> new ArrayList<>()).add(edge);
+        }
+        return incoming;
+    }
+
+    private Map<String, List<com.paiagent.engine.model.WorkflowEdge>> buildOutgoingEdges(WorkflowConfig config) {
+        Map<String, List<com.paiagent.engine.model.WorkflowEdge>> outgoing = new HashMap<>();
+        for (WorkflowNode node : config.getNodes()) {
+            outgoing.put(node.getId(), new ArrayList<>());
+        }
+        for (com.paiagent.engine.model.WorkflowEdge edge : config.getEdges()) {
+            outgoing.computeIfAbsent(edge.getSource(), key -> new ArrayList<>()).add(edge);
+        }
+        return outgoing;
+    }
+
+    private Map<String, Object> buildNodeInput(
+            WorkflowNode node,
+            String rawInput,
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges,
+            Map<String, Map<String, Object>> nodeOutputs,
+            Set<String> activeNodes,
+            Set<String> completedNodes,
+            Set<String> skippedNodes
+    ) {
+        List<com.paiagent.engine.model.WorkflowEdge> incoming = incomingEdges.getOrDefault(node.getId(), List.of());
+        Map<String, Object> input = new HashMap<>();
+
+        if (incoming.isEmpty()) {
+            input.put("input", rawInput);
+        } else {
+            for (com.paiagent.engine.model.WorkflowEdge edge : incoming) {
+                String source = edge.getSource();
+                if (!completedNodes.contains(source) && (activeNodes.contains(source) || !skippedNodes.contains(source))) {
+                    continue;
+                }
+                Map<String, Object> sourceOutput = nodeOutputs.get(source);
+                if (sourceOutput != null) {
+                    input.putAll(sourceOutput);
+                }
+            }
+            if (input.isEmpty()) {
+                input.put("input", rawInput);
+            }
+        }
+
+        input.put("__nodeOutputs__", nodeOutputs);
+        return input;
+    }
+
+    private void activateTarget(
+            String targetId,
+            Set<String> activeNodes,
+            Set<String> scheduledNodes,
+            Set<String> completedNodes,
+            Set<String> skippedNodes,
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges,
+            Queue<String> executionQueue
+    ) {
+        if (completedNodes.contains(targetId) || skippedNodes.contains(targetId)) {
+            return;
+        }
+        activeNodes.add(targetId);
+        if (!scheduledNodes.contains(targetId) && isReady(targetId, activeNodes, completedNodes, skippedNodes, incomingEdges)) {
+            scheduledNodes.add(targetId);
+            executionQueue.offer(targetId);
+        }
+    }
+
+    private boolean isReady(
+            String nodeId,
+            Set<String> activeNodes,
+            Set<String> completedNodes,
+            Set<String> skippedNodes,
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges
+    ) {
+        for (com.paiagent.engine.model.WorkflowEdge edge : incomingEdges.getOrDefault(nodeId, List.of())) {
+            String source = edge.getSource();
+            if (activeNodes.contains(source) && !completedNodes.contains(source)) {
+                return false;
+            }
+            if (!activeNodes.contains(source) && !skippedNodes.contains(source)) {
+                continue;
+            }
+        }
+        return true;
+    }
+
+    private String resolveSelectedBranch(Map<String, Object> output) {
+        Object selectedBranch = output.get("selectedBranch");
+        if (selectedBranch != null) {
+            return String.valueOf(selectedBranch).toLowerCase();
+        }
+        Object conditionResult = output.get("conditionResult");
+        if (conditionResult instanceof Boolean result) {
+            return result ? "true" : "false";
+        }
+        return "false";
+    }
+
+    private List<com.paiagent.engine.model.WorkflowEdge> selectConditionEdges(
+            List<com.paiagent.engine.model.WorkflowEdge> outgoing,
+            String selectedBranch
+    ) {
+        List<com.paiagent.engine.model.WorkflowEdge> selectedEdges = outgoing.stream()
+                .filter(edge -> branchMatches(edge.getSourceHandle(), selectedBranch))
+                .toList();
+        if (!selectedEdges.isEmpty()) {
+            return selectedEdges;
+        }
+
+        boolean hasExplicitHandle = outgoing.stream().anyMatch(edge -> edge.getSourceHandle() != null && !edge.getSourceHandle().isBlank());
+        if (!hasExplicitHandle && !outgoing.isEmpty()) {
+            if ("true".equals(selectedBranch)) {
+                return List.of(outgoing.get(0));
+            }
+            if (outgoing.size() > 1) {
+                return List.of(outgoing.get(1));
+            }
+        }
+        return List.of();
+    }
+
+    private boolean branchMatches(String sourceHandle, String selectedBranch) {
+        if (sourceHandle == null) {
+            return false;
+        }
+        String normalized = sourceHandle.toLowerCase();
+        if ("true".equals(selectedBranch)) {
+            return normalized.equals("true") || normalized.contains("true") || normalized.equals("yes");
+        }
+        return normalized.equals("false") || normalized.contains("false") || normalized.equals("no") || normalized.equals("else");
+    }
+
+    private void skipInactiveBranch(
+            String nodeId,
+            Set<String> activeNodes,
+            Set<String> completedNodes,
+            Set<String> skippedNodes,
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges,
+            Map<String, List<com.paiagent.engine.model.WorkflowEdge>> outgoingEdges
+    ) {
+        if (completedNodes.contains(nodeId) || activeNodes.contains(nodeId) || skippedNodes.contains(nodeId)) {
+            return;
+        }
+
+        skippedNodes.add(nodeId);
+        for (com.paiagent.engine.model.WorkflowEdge edge : outgoingEdges.getOrDefault(nodeId, List.of())) {
+            String target = edge.getTarget();
+            boolean hasLiveIncoming = incomingEdges.getOrDefault(target, List.of()).stream()
+                    .map(com.paiagent.engine.model.WorkflowEdge::getSource)
+                    .anyMatch(source -> activeNodes.contains(source) || completedNodes.contains(source));
+            if (!hasLiveIncoming) {
+                skipInactiveBranch(target, activeNodes, completedNodes, skippedNodes, incomingEdges, outgoingEdges);
+            }
+        }
     }
 }
