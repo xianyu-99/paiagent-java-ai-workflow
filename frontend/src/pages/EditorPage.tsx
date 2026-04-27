@@ -78,6 +78,8 @@ interface RagConfig {
   questionReference?: string;
   topK: number;
   minScore: number;
+  contextWindow: number;
+  contextMaxChars: number;
   prompt: string;
 }
 
@@ -147,6 +149,8 @@ const EditorPage = () => {
     questionReference: 'input-default.user_input',
     topK: 3,
     minScore: 0,
+    contextWindow: 1,
+    contextMaxChars: 1800,
     prompt: ''
   });
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -249,6 +253,8 @@ const EditorPage = () => {
         questionReference: questionParam?.referenceNode || 'input-default.user_input',
         topK: (node.data?.topK as number) || 3,
         minScore: (node.data?.minScore as number) || 0,
+        contextWindow: (node.data?.contextWindow as number) ?? 1,
+        contextMaxChars: (node.data?.contextMaxChars as number) || 1800,
         prompt: (node.data?.prompt as string) || ''
       });
     }
@@ -859,6 +865,8 @@ const EditorPage = () => {
       configId: ragConfig.configId,
       topK: ragConfig.topK,
       minScore: ragConfig.minScore,
+      contextWindow: ragConfig.contextWindow,
+      contextMaxChars: ragConfig.contextMaxChars,
       prompt: ragConfig.prompt,
       inputParams: [
         {
@@ -2065,6 +2073,28 @@ const EditorPage = () => {
                           step={0.01}
                           value={ragConfig.minScore}
                           onChange={(e) => setRagConfig({ ...ragConfig, minScore: Number(e.target.value || 0) })}
+                        />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <Form.Item label="上下文窗口">
+                        <Input
+                          type="number"
+                          min={0}
+                          max={2}
+                          value={ragConfig.contextWindow}
+                          onChange={(e) => setRagConfig({ ...ragConfig, contextWindow: Number(e.target.value || 1) })}
+                        />
+                      </Form.Item>
+                      <Form.Item label="单条上下文字符">
+                        <Input
+                          type="number"
+                          min={400}
+                          max={6000}
+                          step={100}
+                          value={ragConfig.contextMaxChars}
+                          onChange={(e) => setRagConfig({ ...ragConfig, contextMaxChars: Number(e.target.value || 1800) })}
                         />
                       </Form.Item>
                     </div>

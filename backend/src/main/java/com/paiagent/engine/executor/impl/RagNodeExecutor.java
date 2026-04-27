@@ -51,10 +51,15 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         Long knowledgeBaseId = toLong(data.get("knowledgeBaseId"));
         int topK = toInt(data.get("topK"), 3);
         double minScore = toDouble(data.get("minScore"), 0.0);
+        int contextWindow = toInt(data.get("contextWindow"), 1);
+        int contextMaxChars = toInt(data.get("contextMaxChars"), 1800);
         String question = resolveQuestion(data, input);
 
         if (!StringUtils.hasText(question)) {
             throw new IllegalArgumentException("RAG 节点问题不能为空");
+        }
+        if (knowledgeBaseId == null) {
+            throw new IllegalArgumentException("RAG 节点缺少知识库配置");
         }
 
         if (progressCallback != null) {
@@ -62,7 +67,12 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                     node.getId(),
                     node.getType(),
                     "正在检索知识库...",
-                    Map.of("knowledgeBaseId", knowledgeBaseId, "topK", topK)
+                    Map.of(
+                            "knowledgeBaseId", knowledgeBaseId,
+                            "topK", topK,
+                            "contextWindow", contextWindow,
+                            "contextMaxChars", contextMaxChars
+                    )
             ));
         }
 
@@ -73,6 +83,8 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                 question,
                 topK,
                 minScore,
+                contextWindow,
+                contextMaxChars,
                 executionUserId,
                 executionAdmin
         );
@@ -83,7 +95,10 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                     node.getId(),
                     node.getType(),
                     "知识库检索完成，命中 " + chunks.size() + " 个片段",
-                    Map.of("retrieved", chunks.size())
+                    Map.of(
+                            "retrieved", chunks.size(),
+                            "topScore", chunks.isEmpty() ? 0.0 : chunks.get(0).getScore()
+                    )
             ));
         }
 
@@ -179,12 +194,13 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             return "未检索到相关知识片段。";
         }
         return chunks.stream()
-                .map(chunk -> String.format("[%s, score=%.4f, vector=%.4f, keyword=%.4f]\n%s",
+                .map(chunk -> String.format("[%s, score=%.4f, vector=%.4f, keyword=%.4f, matched=%s]\n%s",
                         buildCitation(chunk),
                         chunk.getScore(),
                         chunk.getVectorScore(),
                         chunk.getKeywordScore(),
-                        chunk.getContent()))
+                        chunk.getMatchedTerms(),
+                        StringUtils.hasText(chunk.getContextContent()) ? chunk.getContextContent() : chunk.getContent()))
                 .collect(Collectors.joining("\n\n---\n\n"));
     }
 

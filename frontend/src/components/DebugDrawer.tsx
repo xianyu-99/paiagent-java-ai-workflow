@@ -27,6 +27,22 @@ interface ExecutionResponse {
   errorMessage?: string;
 }
 
+interface RetrievedChunkTrace {
+  chunkId?: number;
+  chunkIndex?: number;
+  sourceName?: string;
+  sectionTitle?: string;
+  pageNumber?: number;
+  score?: number;
+  vectorScore?: number;
+  keywordScore?: number;
+  rank?: number;
+  matchedTerms?: string[];
+  contextChunkIndexes?: number[];
+  content?: string;
+  contextContent?: string;
+}
+
 interface DebugDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -43,6 +59,8 @@ const toRecord = (value: unknown): Record<string, unknown> => {
 const getMessageText = (value: unknown): string => {
   return typeof value === 'string' ? value : '';
 };
+
+const formatScore = (value: unknown) => (typeof value === 'number' ? value.toFixed(4) : '0.0000');
 
 const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
   const [inputData, setInputData] = useState('');
@@ -212,6 +230,55 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
     return Math.round((completed / total) * 100);
   };
 
+  const renderRetrievalTrace = (output: Record<string, unknown>) => {
+    const chunks = output.retrievedChunks;
+    if (!Array.isArray(chunks) || chunks.length === 0) {
+      return null;
+    }
+
+    return (
+      <div>
+        <div className="text-gray-600 text-xs mb-1">RAG 检索命中:</div>
+        <div className="space-y-2">
+          {(chunks as RetrievedChunkTrace[]).map((chunk, index) => (
+            <div key={`${chunk.chunkId ?? index}`} className="bg-blue-50 border border-blue-100 rounded p-2 text-xs">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <span className="font-medium text-blue-800">
+                  #{chunk.rank ?? index + 1} 片段 {(chunk.chunkIndex ?? 0) + 1}
+                </span>
+                <span className="text-blue-700">
+                  score {formatScore(chunk.score)} / v {formatScore(chunk.vectorScore)} / k {formatScore(chunk.keywordScore)}
+                </span>
+              </div>
+              <div className="text-gray-600 mb-1">
+                {[chunk.sourceName, chunk.pageNumber ? `page ${chunk.pageNumber}` : '', chunk.sectionTitle]
+                  .filter(Boolean)
+                  .join(' · ') || '未标注来源'}
+              </div>
+              {Array.isArray(chunk.contextChunkIndexes) && chunk.contextChunkIndexes.length > 0 && (
+                <div className="text-gray-500 mb-1">
+                  上下文窗口: {chunk.contextChunkIndexes.map((chunkIndex) => chunkIndex + 1).join(', ')}
+                </div>
+              )}
+              {Array.isArray(chunk.matchedTerms) && chunk.matchedTerms.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-1">
+                  {chunk.matchedTerms.map((term) => (
+                    <Tag key={term} color="blue" className="m-0">
+                      {term}
+                    </Tag>
+                  ))}
+                </div>
+              )}
+              <div className="text-gray-700 line-clamp-3 whitespace-pre-wrap">
+                {chunk.content || chunk.contextContent || ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderNodeResultItem = (nodeResult: NodeResult) => {
     let statusColor: 'default' | 'success' | 'error' | 'processing' = 'default';
     let statusIcon = <LoadingOutlined />;
@@ -247,6 +314,7 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
           </div>
           <div>
             <div className="text-gray-600 text-xs mb-1">输出数据:</div>
+            {renderRetrievalTrace(nodeResult.output)}
             <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-32">
               {JSON.stringify(nodeResult.output, null, 2)}
             </pre>

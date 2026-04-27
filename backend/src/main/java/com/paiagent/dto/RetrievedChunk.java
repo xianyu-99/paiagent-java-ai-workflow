@@ -4,6 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -28,4 +30,12 @@ public class RetrievedChunk {
     private Double vectorScore;
 
     private Double keywordScore;
+
+    private Integer rank;
+
+    private List<String> matchedTerms;
+
+    private String contextContent;
+
+    private List<Integer> contextChunkIndexes;
 }

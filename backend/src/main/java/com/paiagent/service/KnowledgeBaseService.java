@@ -48,6 +48,18 @@ public class KnowledgeBaseService {
 
     private static final int IMPORT_EMBEDDING_BATCH_SIZE = 16;
 
+    private static final int MAX_RETRIEVAL_TOP_K = 10;
+
+    private static final int DEFAULT_CONTEXT_WINDOW = 1;
+
+    private static final int MAX_CONTEXT_WINDOW = 2;
+
+    private static final int DEFAULT_CONTEXT_MAX_CHARS = 1800;
+
+    private static final int MIN_CONTEXT_MAX_CHARS = 400;
+
+    private static final int MAX_CONTEXT_MAX_CHARS = 6000;
+
     private final KnowledgeBaseMapper knowledgeBaseMapper;
 
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
@@ -252,6 +264,15 @@ public class KnowledgeBaseService {
     }
 
     public List<RetrievedChunk> retrieve(Long knowledgeBaseId, String query, int topK, double minScore) {
+        return retrieve(knowledgeBaseId, query, topK, minScore, DEFAULT_CONTEXT_WINDOW, DEFAULT_CONTEXT_MAX_CHARS);
+    }
+
+    public List<RetrievedChunk> retrieve(Long knowledgeBaseId,
+                                         String query,
+                                         int topK,
+                                         double minScore,
+                                         int contextWindow,
+                                         int contextMaxChars) {
         if (knowledgeBaseId == null) {
             throw new IllegalArgumentException("RAG 节点缺少知识库配置");
         }
@@ -259,8 +280,10 @@ public class KnowledgeBaseService {
             return List.of();
         }
 
-        int safeTopK = Math.max(1, topK);
-        int candidateLimit = Math.max(safeTopK * 4, safeTopK + 8);
+        int safeTopK = Math.min(MAX_RETRIEVAL_TOP_K, Math.max(1, topK));
+        int safeContextWindow = Math.max(0, Math.min(MAX_CONTEXT_WINDOW, contextWindow));
+        int safeContextMaxChars = Math.max(MIN_CONTEXT_MAX_CHARS, Math.min(MAX_CONTEXT_MAX_CHARS, contextMaxChars));
+        int candidateLimit = Math.max(safeTopK * 6, safeTopK + 12);
         List<Double> queryEmbedding = textEmbeddingService.embed(query);
         List<VectorSearchHit> vectorHits = knowledgeVectorStoreService.search(knowledgeBaseId, queryEmbedding, candidateLimit, 0.0);
         List<KnowledgeChunk> keywordHits = searchKeywordCandidates(knowledgeBaseId, query, candidateLimit);
@@ -300,7 +323,7 @@ public class KnowledgeBaseService {
             }
         }
 
-        return candidates.values().stream()
+        List<RetrievalCandidate> rankedCandidates = candidates.values().stream()
                 .filter(candidate -> candidate.chunk() != null)
                 .peek(candidate -> {
                     if (candidate.keywordScore() == null) {
@@ -314,6 +337,10 @@ public class KnowledgeBaseService {
                 .filter(candidate -> candidate.rerankScore() >= minScore)
                 .sorted((left, right) -> Double.compare(right.rerankScore(), left.rerankScore()))
                 .limit(safeTopK)
+                .toList();
+
+        enrichRetrievedCandidates(rankedCandidates, query, safeContextWindow, safeContextMaxChars);
+        return rankedCandidates.stream()
                 .map(this::toRetrievedChunk)
                 .toList();
     }
@@ -326,6 +353,18 @@ public class KnowledgeBaseService {
                                                    boolean admin) {
         getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
         return retrieve(knowledgeBaseId, query, topK, minScore);
+    }
+
+    public List<RetrievedChunk> retrieveAuthorized(Long knowledgeBaseId,
+                                                   String query,
+                                                   int topK,
+                                                   double minScore,
+                                                   int contextWindow,
+                                                   int contextMaxChars,
+                                                   Long userId,
+                                                   boolean admin) {
+        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        return retrieve(knowledgeBaseId, query, topK, minScore, contextWindow, contextMaxChars);
     }
 
     @Transactional
@@ -610,15 +649,69 @@ public class KnowledgeBaseService {
                 .and(nested -> {
                     for (int i = 0; i < terms.size(); i++) {
                         String term = terms.get(i);
-                        if (i == 0) {
-                            nested.like(KnowledgeChunk::getContent, term);
-                        } else {
-                            nested.or().like(KnowledgeChunk::getContent, term);
+                        if (i > 0) {
+                            nested.or();
                         }
+                        nested.and(termWrapper -> termWrapper
+                                .like(KnowledgeChunk::getContent, term)
+                                .or()
+                                .like(KnowledgeChunk::getSourceName, term)
+                                .or()
+                                .like(KnowledgeChunk::getSectionTitle, term));
                     }
                 })
                 .last("LIMIT " + Math.max(1, limit));
         return knowledgeChunkMapper.selectList(wrapper);
+    }
+
+    private void enrichRetrievedCandidates(List<RetrievalCandidate> candidates,
+                                           String query,
+                                           int contextWindow,
+                                           int contextMaxChars) {
+        int rank = 1;
+        for (RetrievalCandidate candidate : candidates) {
+            candidate.rank(rank++);
+            candidate.matchedTerms(ragRetrievalScorer.matchedTerms(query, candidate.chunk()));
+
+            List<KnowledgeChunk> contextChunks = loadContextWindow(candidate.chunk(), contextWindow);
+            candidate.contextChunkIndexes(contextChunks.stream()
+                    .map(KnowledgeChunk::getChunkIndex)
+                    .toList());
+            candidate.contextContent(buildContextContent(contextChunks, contextMaxChars));
+        }
+    }
+
+    private List<KnowledgeChunk> loadContextWindow(KnowledgeChunk centerChunk, int contextWindow) {
+        if (centerChunk == null) {
+            return List.of();
+        }
+        if (contextWindow <= 0 || centerChunk.getDocumentId() == null || centerChunk.getChunkIndex() == null) {
+            return List.of(centerChunk);
+        }
+
+        int startIndex = Math.max(0, centerChunk.getChunkIndex() - contextWindow);
+        int endIndex = centerChunk.getChunkIndex() + contextWindow;
+        List<KnowledgeChunk> contextChunks = knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
+                .eq(KnowledgeChunk::getKnowledgeBaseId, centerChunk.getKnowledgeBaseId())
+                .eq(KnowledgeChunk::getDocumentId, centerChunk.getDocumentId())
+                .between(KnowledgeChunk::getChunkIndex, startIndex, endIndex)
+                .orderByAsc(KnowledgeChunk::getChunkIndex));
+        return contextChunks.isEmpty() ? List.of(centerChunk) : contextChunks;
+    }
+
+    private String buildContextContent(List<KnowledgeChunk> contextChunks, int contextMaxChars) {
+        String context = contextChunks.stream()
+                .map(chunk -> "【片段 " + (chunk.getChunkIndex() + 1) + "】\n" + chunk.getContent())
+                .collect(Collectors.joining("\n\n"));
+        return abbreviate(context, contextMaxChars);
+    }
+
+    private String abbreviate(String text, int maxChars) {
+        if (text == null || text.length() <= maxChars) {
+            return text;
+        }
+        int end = Math.max(0, maxChars - 12);
+        return text.substring(0, end).trim() + "\n...(已截断)";
     }
 
     private RetrievedChunk toRetrievedChunk(RetrievalCandidate candidate) {
@@ -633,7 +726,11 @@ public class KnowledgeBaseService {
                 chunk.getPageNumber(),
                 candidate.rerankScore(),
                 candidate.vectorScore() == null ? 0.0 : candidate.vectorScore(),
-                candidate.keywordScore() == null ? 0.0 : candidate.keywordScore()
+                candidate.keywordScore() == null ? 0.0 : candidate.keywordScore(),
+                candidate.rank(),
+                candidate.matchedTerms(),
+                candidate.contextContent(),
+                candidate.contextChunkIndexes()
         );
     }
 
@@ -785,6 +882,14 @@ public class KnowledgeBaseService {
 
         private Double rerankScore = 0.0;
 
+        private Integer rank = 0;
+
+        private List<String> matchedTerms = List.of();
+
+        private String contextContent = "";
+
+        private List<Integer> contextChunkIndexes = List.of();
+
         private RetrievalCandidate(Long chunkId) {
             this.chunkId = chunkId;
         }
@@ -826,6 +931,42 @@ public class KnowledgeBaseService {
 
         private RetrievalCandidate rerankScore(Double rerankScore) {
             this.rerankScore = rerankScore;
+            return this;
+        }
+
+        private Integer rank() {
+            return rank;
+        }
+
+        private RetrievalCandidate rank(Integer rank) {
+            this.rank = rank;
+            return this;
+        }
+
+        private List<String> matchedTerms() {
+            return matchedTerms;
+        }
+
+        private RetrievalCandidate matchedTerms(List<String> matchedTerms) {
+            this.matchedTerms = matchedTerms == null ? List.of() : matchedTerms;
+            return this;
+        }
+
+        private String contextContent() {
+            return contextContent;
+        }
+
+        private RetrievalCandidate contextContent(String contextContent) {
+            this.contextContent = contextContent == null ? "" : contextContent;
+            return this;
+        }
+
+        private List<Integer> contextChunkIndexes() {
+            return contextChunkIndexes;
+        }
+
+        private RetrievalCandidate contextChunkIndexes(List<Integer> contextChunkIndexes) {
+            this.contextChunkIndexes = contextChunkIndexes == null ? List.of() : contextChunkIndexes;
             return this;
         }
     }

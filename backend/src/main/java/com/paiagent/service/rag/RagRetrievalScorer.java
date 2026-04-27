@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -17,16 +18,21 @@ public class RagRetrievalScorer {
 
     private static final Pattern TOKEN_PATTERN = Pattern.compile("[\\p{IsHan}]+|[A-Za-z0-9]+");
 
+    private static final List<String> QUERY_STOP_PHRASES = Arrays.asList(
+            "请问", "帮我", "我想", "如何", "怎么", "怎样", "什么", "哪些", "为什么",
+            "是否", "能否", "可以", "能够", "需要", "一下", "这个", "那个"
+    );
+
     public List<String> searchTerms(String query) {
         List<String> terms = tokenize(query);
         return terms.stream()
-                .filter(term -> term.length() >= 2)
-                .limit(10)
+                .filter(this::isSearchableTerm)
+                .limit(16)
                 .toList();
     }
 
     public double keywordScore(String query, KnowledgeChunk chunk) {
-        List<String> terms = tokenize(query);
+        List<String> terms = searchTerms(query);
         if (terms.isEmpty() || chunk == null) {
             return 0.0;
         }
@@ -47,14 +53,33 @@ public class RagRetrievalScorer {
             }
         }
 
-        String normalizedQuery = lower(query).replaceAll("\\s+", "");
+        String normalizedQuery = lower(normalizeQuery(query)).replaceAll("\\s+", "");
         double phraseBoost = StringUtils.hasText(normalizedQuery)
                 && content.replaceAll("\\s+", "").contains(normalizedQuery)
                 ? 0.20
                 : 0.0;
+        double metadataPhraseBoost = StringUtils.hasText(normalizedQuery)
+                && metadata.replaceAll("\\s+", "").contains(normalizedQuery)
+                ? 0.10
+                : 0.0;
         double contentScore = matched / (double) terms.size();
         double metadataBoost = Math.min(0.15, metadataMatched * 0.05);
-        return Math.min(1.0, contentScore * 0.75 + phraseBoost + metadataBoost);
+        return Math.min(1.0, contentScore * 0.70 + phraseBoost + metadataBoost + metadataPhraseBoost);
+    }
+
+    public List<String> matchedTerms(String query, KnowledgeChunk chunk) {
+        if (chunk == null) {
+            return List.of();
+        }
+        String searchable = lower(String.join(" ",
+                safe(chunk.getContent()),
+                safe(chunk.getSourceName()),
+                safe(chunk.getSectionTitle())
+        ));
+        return searchTerms(query).stream()
+                .filter(searchable::contains)
+                .limit(12)
+                .toList();
     }
 
     public double rerankScore(double vectorScore, double keywordScore) {
@@ -69,7 +94,7 @@ public class RagRetrievalScorer {
         }
 
         Set<String> terms = new LinkedHashSet<>();
-        Matcher matcher = TOKEN_PATTERN.matcher(query);
+        Matcher matcher = TOKEN_PATTERN.matcher(normalizeQuery(query));
         while (matcher.find()) {
             String token = lower(matcher.group());
             if (!StringUtils.hasText(token)) {
@@ -82,6 +107,18 @@ public class RagRetrievalScorer {
             }
         }
         return new ArrayList<>(terms);
+    }
+
+    private String normalizeQuery(String query) {
+        String normalized = query == null ? "" : query;
+        for (String stopPhrase : QUERY_STOP_PHRASES) {
+            normalized = normalized.replace(stopPhrase, " ");
+        }
+        return normalized;
+    }
+
+    private boolean isSearchableTerm(String term) {
+        return term.length() >= 2 && !QUERY_STOP_PHRASES.contains(term);
     }
 
     private void addHanNgrams(String token, Set<String> terms) {

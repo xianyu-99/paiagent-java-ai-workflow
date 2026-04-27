@@ -188,8 +188,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     'KNOWLEDGE',
                     '📚',
                     '{"type":"object","properties":{"question":{"type":"string"}}}',
-                    '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"}}}',
-                    '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"configId":{"type":"number"},"prompt":{"type":"string"}}}'
+                    '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"},"retrievedCount":{"type":"number"}}}',
+                    '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"contextWindow":{"type":"number","default":1},"contextMaxChars":{"type":"number","default":1800},"configId":{"type":"number"},"prompt":{"type":"string"}}}'
                 )
                 ON DUPLICATE KEY UPDATE
                     display_name = VALUES(display_name),

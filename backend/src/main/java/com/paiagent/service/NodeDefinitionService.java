@@ -97,8 +97,8 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setCategory("KNOWLEDGE");
         nodeDefinition.setIcon("📚");
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"}}}");
-        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"context\":{\"type\":\"string\"},\"retrievedChunks\":{\"type\":\"array\"}}}");
-        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"knowledgeBaseId\":{\"type\":\"number\"},\"topK\":{\"type\":\"number\",\"default\":3},\"minScore\":{\"type\":\"number\",\"default\":0},\"configId\":{\"type\":\"number\"},\"prompt\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"context\":{\"type\":\"string\"},\"retrievedChunks\":{\"type\":\"array\"},\"retrievedCount\":{\"type\":\"number\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"knowledgeBaseId\":{\"type\":\"number\"},\"topK\":{\"type\":\"number\",\"default\":3},\"minScore\":{\"type\":\"number\",\"default\":0},\"contextWindow\":{\"type\":\"number\",\"default\":1},\"contextMaxChars\":{\"type\":\"number\",\"default\":1800},\"configId\":{\"type\":\"number\"},\"prompt\":{\"type\":\"string\"}}}");
         return nodeDefinition;
     }
 }

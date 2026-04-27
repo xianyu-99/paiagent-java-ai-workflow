@@ -197,8 +197,8 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 
 ('rag', '知识库问答', 'KNOWLEDGE', '📚',
  '{"type": "object", "properties": {"question": {"type": "string"}}}',
- '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "retrievedChunks": {"type": "array"}}}',
- '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
+ '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "retrievedChunks": {"type": "array"}, "retrievedCount": {"type": "number"}}}',
+ '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "contextWindow": {"type": "number", "default": 1}, "contextMaxChars": {"type": "number", "default": 1800}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
 ON DUPLICATE KEY UPDATE updated_at = CURRENT_TIMESTAMP;
 
 -- 全局 LLM 配置表
