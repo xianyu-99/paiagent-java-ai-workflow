@@ -79,6 +79,7 @@ TTS 节点已经实现完整链路：
 - 支持导入 txt / markdown 文本内容
 - 后端自动按长度和标点进行文本切片
 - 支持可插拔 Embedding Provider：默认本地 Hash Embedding，可切换 DashScope `text-embedding-v4`
+- 支持可插拔 VectorStore：默认 MySQL JSON 向量兜底，Docker Compose 演示环境可启用 Qdrant
 - 支持知识库向量索引重建，避免切换 Embedding 模型后新旧向量混用
 - 使用余弦相似度召回相关知识片段
 - RAG 节点先召回相关知识片段，再将 `context + question` 拼入 LLM 提示词生成回答
@@ -104,6 +105,26 @@ RAG_EMBEDDING_BATCH_SIZE=16
 ```
 
 切换 Embedding Provider 或模型后，需要在前端 RAG 节点配置区点击“重建向量索引”，让历史知识库切片重新生成向量。
+
+### RAG VectorStore 配置
+
+默认本地开发使用 MySQL 存向量，便于最小复现：
+
+```env
+RAG_VECTOR_STORE_PROVIDER=mysql
+```
+
+如果要使用 Qdrant 做专用向量索引，可以配置：
+
+```env
+RAG_VECTOR_STORE_PROVIDER=qdrant
+QDRANT_URL=http://localhost:6333
+QDRANT_API_KEY=
+QDRANT_COLLECTION_PREFIX=paiagent_chunks
+RAG_VECTOR_STORE_FALLBACK_TO_MYSQL=true
+```
+
+Qdrant collection 会按 Embedding 类型和维度自动隔离，例如 `paiagent_chunks_local_256`、`paiagent_chunks_dashscope_1024`，避免不同维度的向量混写。
 
 ### 实时执行调试
 
@@ -131,7 +152,7 @@ RAG_EMBEDDING_BATCH_SIZE=16
 
 ### Docker Compose 一键部署
 
-- 提供 MySQL、Redis、MinIO、后端、前端的一键编排
+- 提供 MySQL、Redis、MinIO、Qdrant、后端、前端的一键编排
 - 前端使用 Nginx 托管静态资源，并反向代理 `/api`
 - 支持本机演示和局域网访问
 
@@ -143,6 +164,7 @@ RAG_EMBEDDING_BATCH_SIZE=16
 | AI 调用 | Spring AI、OpenAI Compatible API、DashScope / Qwen、Zhipu GLM |
 | 工作流 | 自研 DAG 引擎、LangGraph4j 状态图引擎 |
 | 数据库 | MySQL |
+| 向量库 | Qdrant，可回退 MySQL JSON 向量 |
 | 缓存 | Redis |
 | 文件存储 | MinIO |
 | 前端 | React 18、TypeScript、Vite、ReactFlow、Ant Design、Zustand |
@@ -166,7 +188,8 @@ MySQL
 
 Backend -> Redis      : refresh token / runtime cache
 Backend -> MinIO      : audio file storage
-Backend -> MySQL      : workflow / execution / knowledge base / vectors
+Backend -> MySQL      : workflow / execution / knowledge base / chunk metadata
+Backend -> Qdrant     : vector index / topK semantic retrieval
 Backend -> LLM / TTS  : model provider API
 ```
 
@@ -319,7 +342,7 @@ http://你的局域网IP:5173
 - 增加执行可靠性基础版：运行中状态记录、节点超时、失败重试、错误日志、重试事件推送
 - 增加 DAG if/else 条件分支节点：支持 true / false 出口、上游参数引用和动态分支执行
 - 跑通 LangGraph4j conditional edge 条件分支和基础循环执行，并补充自动化测试
-- 增加 RAG 知识库节点：知识库创建、文本导入、自动切片、可插拔 Embedding、相似度检索、向量重建和 LLM 回答
+- 增加 RAG 知识库节点：知识库创建、文本导入、自动切片、可插拔 Embedding、Qdrant 向量索引、相似度检索、向量重建和 LLM 回答
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
 
 ## 当前边界
@@ -327,19 +350,19 @@ http://你的局域网IP:5173
 - DAG 引擎是当前主要稳定路径，适合常规工作流执行
 - LangGraph4j 已支持条件分支和基础循环，但复杂 Agent 状态流、人工中断、检查点恢复仍属于后续增强方向
 - RAG 默认使用本地 Hash Embedding，适合演示和复现；已支持切换 DashScope Embedding，生产环境还可继续接入 BGE / OpenAI Embedding
-- RAG 当前向量仍存储在 MySQL JSON 字段并由 Java 做相似度计算；大规模知识库建议升级为 pgvector / Milvus
+- RAG 已支持 MySQL JSON 向量兜底和 Qdrant 专用向量索引；超大规模知识库可继续升级 Milvus
 - RAG 当前支持文本内容导入，PDF / Word 解析、多知识库权限审计可继续扩展
 - 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 
 ## 简历描述参考
 
-> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 LangGraph4j 状态图引擎，支持 conditional edge 条件路由和基础循环状态流；实现 RAG 知识库节点，支持文本导入、自动切片、可插拔 Embedding Provider、本地 Hash / DashScope 向量化切换、向量索引重建、相似度检索和基于检索上下文的 LLM 回答；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
+> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 LangGraph4j 状态图引擎，支持 conditional edge 条件路由和基础循环状态流；实现 RAG 知识库节点，支持文本导入、自动切片、可插拔 Embedding Provider、本地 Hash / DashScope 向量化切换、Qdrant 向量索引、MySQL 兜底检索、向量索引重建、相似度检索和基于检索上下文的 LLM 回答；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
 
 ## 后续规划
 
 - 增加分类器节点和更复杂的多分支路由节点
 - 增强 LangGraph4j Agent 状态流、检查点恢复和人工中断
-- 增强 RAG：接入 PDF / Word 解析、pgvector / Milvus 向量数据库和多知识库管理
+- 增强 RAG：接入 PDF / Word 解析、Milvus 超大规模向量库和多知识库管理
 - 增加执行中断、工作流版本发布和执行快照
 - 增加更多模型供应商和统一模型健康检查
 

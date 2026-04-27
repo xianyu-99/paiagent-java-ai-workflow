@@ -13,13 +13,18 @@ import com.paiagent.entity.KnowledgeDocument;
 import com.paiagent.mapper.KnowledgeBaseMapper;
 import com.paiagent.mapper.KnowledgeChunkMapper;
 import com.paiagent.mapper.KnowledgeDocumentMapper;
+import com.paiagent.service.vector.KnowledgeVectorStoreService;
+import com.paiagent.service.vector.VectorSearchHit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 public class KnowledgeBaseService {
@@ -36,14 +41,18 @@ public class KnowledgeBaseService {
 
     private final TextEmbeddingService textEmbeddingService;
 
+    private final KnowledgeVectorStoreService knowledgeVectorStoreService;
+
     public KnowledgeBaseService(KnowledgeBaseMapper knowledgeBaseMapper,
                                 KnowledgeDocumentMapper knowledgeDocumentMapper,
                                 KnowledgeChunkMapper knowledgeChunkMapper,
-                                TextEmbeddingService textEmbeddingService) {
+                                TextEmbeddingService textEmbeddingService,
+                                KnowledgeVectorStoreService knowledgeVectorStoreService) {
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.knowledgeDocumentMapper = knowledgeDocumentMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
         this.textEmbeddingService = textEmbeddingService;
+        this.knowledgeVectorStoreService = knowledgeVectorStoreService;
     }
 
     public List<KnowledgeBaseResponse> listKnowledgeBases(Long userId, boolean admin) {
@@ -98,6 +107,7 @@ public class KnowledgeBaseService {
         knowledgeDocumentMapper.insert(document);
 
         List<List<Double>> embeddings = textEmbeddingService.embedBatch(chunks);
+        List<KnowledgeChunk> insertedChunks = new ArrayList<>();
         for (int i = 0; i < chunks.size(); i++) {
             String chunkText = chunks.get(i);
             KnowledgeChunk chunk = new KnowledgeChunk();
@@ -109,7 +119,9 @@ public class KnowledgeBaseService {
             applyEmbeddingMetadata(chunk);
             chunk.setTokenCount(estimateTokens(chunkText));
             knowledgeChunkMapper.insert(chunk);
+            insertedChunks.add(chunk);
         }
+        knowledgeVectorStoreService.upsert(insertedChunks);
 
         return new KnowledgeDocumentResponse(
                 document.getId(),
@@ -145,21 +157,38 @@ public class KnowledgeBaseService {
         }
 
         List<Double> queryEmbedding = textEmbeddingService.embed(query);
-        return knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
-                        .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId))
+        List<VectorSearchHit> hits = knowledgeVectorStoreService.search(knowledgeBaseId, queryEmbedding, topK, minScore);
+        if (hits.isEmpty()) {
+            return List.of();
+        }
+
+        Map<Long, KnowledgeChunk> chunkMap = knowledgeChunkMapper.selectBatchIds(hits.stream()
+                        .map(VectorSearchHit::chunkId)
+                        .toList())
                 .stream()
                 .filter(this::isCompatibleEmbedding)
-                .map(chunk -> new RetrievedChunk(
-                        chunk.getId(),
-                        chunk.getDocumentId(),
-                        chunk.getChunkIndex(),
-                        chunk.getContent(),
-                        textEmbeddingService.cosine(queryEmbedding, textEmbeddingService.deserialize(chunk.getEmbedding()))
-                ))
-                .filter(chunk -> chunk.getScore() >= minScore)
-                .sorted(Comparator.comparing(RetrievedChunk::getScore).reversed())
-                .limit(Math.max(1, topK))
-                .toList();
+                .collect(Collectors.toMap(
+                        KnowledgeChunk::getId,
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+
+        List<RetrievedChunk> retrievedChunks = new ArrayList<>();
+        for (VectorSearchHit hit : hits) {
+            KnowledgeChunk chunk = chunkMap.get(hit.chunkId());
+            if (chunk == null) {
+                continue;
+            }
+            retrievedChunks.add(new RetrievedChunk(
+                    chunk.getId(),
+                    chunk.getDocumentId(),
+                    chunk.getChunkIndex(),
+                    chunk.getContent(),
+                    hit.score()
+            ));
+        }
+        return retrievedChunks;
     }
 
     @Transactional
@@ -188,6 +217,7 @@ public class KnowledgeBaseService {
             applyEmbeddingMetadata(chunk);
             knowledgeChunkMapper.updateById(chunk);
         }
+        knowledgeVectorStoreService.upsert(chunks);
 
         return new KnowledgeReindexResponse(
                 knowledgeBaseId,
@@ -201,6 +231,7 @@ public class KnowledgeBaseService {
     @Transactional
     public void deleteKnowledgeBase(Long id, Long userId, boolean admin) {
         getAuthorizedKnowledgeBase(id, userId, admin);
+        knowledgeVectorStoreService.deleteKnowledgeBase(id);
         knowledgeChunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunk>().eq(KnowledgeChunk::getKnowledgeBaseId, id));
         knowledgeDocumentMapper.delete(new LambdaQueryWrapper<KnowledgeDocument>().eq(KnowledgeDocument::getKnowledgeBaseId, id));
         knowledgeBaseMapper.deleteById(id);

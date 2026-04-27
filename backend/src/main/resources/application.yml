@@ -100,5 +100,12 @@ paiagent:
       dimensions: ${RAG_EMBEDDING_DIMENSIONS:1024}
       timeout-ms: ${RAG_EMBEDDING_TIMEOUT_MS:30000}
       batch-size: ${RAG_EMBEDDING_BATCH_SIZE:16}
+    vector-store:
+      provider: ${RAG_VECTOR_STORE_PROVIDER:mysql}
+      qdrant-url: ${QDRANT_URL:http://localhost:6333}
+      qdrant-api-key: ${QDRANT_API_KEY:}
+      collection-prefix: ${QDRANT_COLLECTION_PREFIX:paiagent_chunks}
+      timeout-ms: ${QDRANT_TIMEOUT_MS:30000}
+      fallback-to-mysql: ${RAG_VECTOR_STORE_FALLBACK_TO_MYSQL:true}
   skills:
     path: skills

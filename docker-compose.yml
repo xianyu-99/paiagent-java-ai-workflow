@@ -51,6 +51,15 @@ services:
       timeout: 5s
       retries: 10
 
+  qdrant:
+    image: qdrant/qdrant:v1.12.5
+    container_name: paiagent-qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - paiagent_qdrant_data:/qdrant/storage
+
   backend:
     build:
       context: ./backend
@@ -79,6 +88,12 @@ services:
       WORKFLOW_MAX_NODE_RETRY_COUNT: ${WORKFLOW_MAX_NODE_RETRY_COUNT:-3}
       WORKFLOW_NODE_RETRY_BACKOFF_MS: ${WORKFLOW_NODE_RETRY_BACKOFF_MS:-500}
       WORKFLOW_NODE_EXECUTOR_POOL_SIZE: ${WORKFLOW_NODE_EXECUTOR_POOL_SIZE:-8}
+      RAG_VECTOR_STORE_PROVIDER: ${RAG_VECTOR_STORE_PROVIDER:-qdrant}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION_PREFIX: ${QDRANT_COLLECTION_PREFIX:-paiagent_chunks}
+      QDRANT_TIMEOUT_MS: ${QDRANT_TIMEOUT_MS:-30000}
+      RAG_VECTOR_STORE_FALLBACK_TO_MYSQL: ${RAG_VECTOR_STORE_FALLBACK_TO_MYSQL:-true}
     ports:
       - "${BACKEND_PORT:-8085}:8084"
     depends_on:
@@ -88,6 +103,8 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      qdrant:
+        condition: service_started
 
   frontend:
     build:
@@ -104,3 +121,4 @@ volumes:
   paiagent_mysql_data:
   paiagent_redis_data:
   paiagent_minio_data:
+  paiagent_qdrant_data:
