@@ -49,6 +49,15 @@ export const uploadKnowledgeDocument = (
   return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents`, data);
 };
 
+export const uploadKnowledgeFile = (
+  knowledgeBaseId: number,
+  file: File
+): Promise<ApiResult<KnowledgeDocument>> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents/file`, formData);
+};
+
 export const listKnowledgeDocuments = (
   knowledgeBaseId: number
 ): Promise<ApiResult<KnowledgeDocument[]>> => {

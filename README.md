@@ -76,7 +76,7 @@ TTS 节点已经实现完整链路：
 ### RAG 知识库节点
 
 - 支持创建用户级知识库
-- 支持导入 txt / markdown 文本内容
+- 支持粘贴导入 txt / markdown 文本内容，也支持本地 txt / markdown 文件上传
 - 后端自动按长度和标点进行文本切片
 - 支持可插拔 Embedding Provider：默认本地 Hash Embedding，可切换 DashScope `text-embedding-v4`
 - 支持可插拔 VectorStore：默认 MySQL JSON 向量兜底，Docker Compose 演示环境可启用 Qdrant

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Form, message, Checkbox, Select, Modal, List } from 'antd';
-import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload } from 'antd';
+import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { Edge, MarkerType, Node } from '@xyflow/react';
 import NodePanel from '../components/NodePanel';
 import FlowCanvas from '../components/FlowCanvas';
@@ -17,6 +17,7 @@ import {
   listKnowledgeBases,
   rebuildKnowledgeBaseEmbeddings,
   uploadKnowledgeDocument,
+  uploadKnowledgeFile,
   KnowledgeBase,
 } from '../api/knowledge';
 import { getRefreshToken } from '../utils/auth';
@@ -153,6 +154,8 @@ const EditorPage = () => {
   const [knowledgeFileName, setKnowledgeFileName] = useState('manual.txt');
   const [knowledgeContent, setKnowledgeContent] = useState('');
   const [knowledgeReindexing, setKnowledgeReindexing] = useState(false);
+  const [knowledgeLocalFile, setKnowledgeLocalFile] = useState<File | null>(null);
+  const [knowledgeFileUploading, setKnowledgeFileUploading] = useState(false);
 
   // 自动保存定时器
   const autoSaveTimerRef = useRef<number | null>(null);
@@ -905,6 +908,31 @@ const EditorPage = () => {
       await refreshKnowledgeBases();
     } else {
       message.error(response.message || '文档导入失败');
+    }
+  };
+
+  const handleUploadKnowledgeLocalFile = async () => {
+    if (!ragConfig.knowledgeBaseId) {
+      message.warning('请先选择知识库');
+      return;
+    }
+    if (!knowledgeLocalFile) {
+      message.warning('请选择本地 txt / markdown 文件');
+      return;
+    }
+
+    setKnowledgeFileUploading(true);
+    try {
+      const response = await uploadKnowledgeFile(ragConfig.knowledgeBaseId, knowledgeLocalFile);
+      if (response.code === 200) {
+        message.success(`文件上传成功，生成 ${response.data.chunkCount} 个切片`);
+        setKnowledgeLocalFile(null);
+        await refreshKnowledgeBases();
+      } else {
+        message.error(response.message || '文件上传失败');
+      }
+    } finally {
+      setKnowledgeFileUploading(false);
     }
   };
 
@@ -1904,22 +1932,71 @@ const EditorPage = () => {
                     </div>
 
                     <div className="mb-4 p-3 border rounded bg-gray-50">
-                      <div className="font-medium text-gray-700 mb-2">导入知识文本</div>
-                      <Input
-                        className="mb-2"
-                        placeholder="文件名，如 faq.md"
-                        value={knowledgeFileName}
-                        onChange={(e) => setKnowledgeFileName(e.target.value)}
+                      <div className="font-medium text-gray-700 mb-2">导入知识</div>
+                      <Tabs
+                        size="small"
+                        items={[
+                          {
+                            key: 'paste',
+                            label: '粘贴文本',
+                            children: (
+                              <>
+                                <Input
+                                  className="mb-2"
+                                  placeholder="文件名，如 faq.md"
+                                  value={knowledgeFileName}
+                                  onChange={(e) => setKnowledgeFileName(e.target.value)}
+                                />
+                                <Input.TextArea
+                                  rows={5}
+                                  placeholder="粘贴 txt / markdown 文本，后端会自动切片并向量化"
+                                  value={knowledgeContent}
+                                  onChange={(e) => setKnowledgeContent(e.target.value)}
+                                />
+                                <Button className="mt-2" block onClick={handleUploadKnowledgeDocument}>
+                                  上传并切片
+                                </Button>
+                              </>
+                            )
+                          },
+                          {
+                            key: 'file',
+                            label: '本地文件',
+                            children: (
+                              <>
+                                <Upload
+                                  accept=".txt,.md,.markdown,text/plain,text/markdown"
+                                  maxCount={1}
+                                  beforeUpload={(file) => {
+                                    setKnowledgeLocalFile(file);
+                                    return false;
+                                  }}
+                                  onRemove={() => {
+                                    setKnowledgeLocalFile(null);
+                                  }}
+                                  fileList={knowledgeLocalFile ? [{
+                                    uid: knowledgeLocalFile.name,
+                                    name: knowledgeLocalFile.name,
+                                    status: 'done'
+                                  }] : []}
+                                >
+                                  <Button icon={<UploadOutlined />} block>
+                                    选择本地 txt / markdown 文件
+                                  </Button>
+                                </Upload>
+                                <Button
+                                  className="mt-2"
+                                  block
+                                  loading={knowledgeFileUploading}
+                                  onClick={handleUploadKnowledgeLocalFile}
+                                >
+                                  上传文件并切片
+                                </Button>
+                              </>
+                            )
+                          }
+                        ]}
                       />
-                      <Input.TextArea
-                        rows={5}
-                        placeholder="粘贴 txt / markdown 文本，后端会自动切片并向量化"
-                        value={knowledgeContent}
-                        onChange={(e) => setKnowledgeContent(e.target.value)}
-                      />
-                      <Button className="mt-2" block onClick={handleUploadKnowledgeDocument}>
-                        上传并切片
-                      </Button>
                       <Button
                         className="mt-2"
                         block
