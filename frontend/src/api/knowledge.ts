@@ -30,6 +30,23 @@ export interface KnowledgeDocument {
   createdAt?: string;
 }
 
+export interface KnowledgeImportTask {
+  id: number;
+  knowledgeBaseId: number;
+  documentId?: number;
+  fileName: string;
+  contentType?: string;
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
+  stage?: string;
+  progress?: number;
+  totalChunks?: number;
+  processedChunks?: number;
+  errorMessage?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+}
+
 export interface KnowledgeChunk {
   id: number;
   documentId: number;
@@ -66,6 +83,16 @@ export const uploadKnowledgeDocument = (
   return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents`, data);
 };
 
+export const startKnowledgeTextImport = (
+  knowledgeBaseId: number,
+  data: {
+    fileName?: string;
+    content: string;
+  }
+): Promise<ApiResult<KnowledgeImportTask>> => {
+  return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents/async`, data);
+};
+
 export const uploadKnowledgeFile = (
   knowledgeBaseId: number,
   file: File
@@ -73,6 +100,15 @@ export const uploadKnowledgeFile = (
   const formData = new FormData();
   formData.append('file', file);
   return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents/file`, formData);
+};
+
+export const startKnowledgeFileImport = (
+  knowledgeBaseId: number,
+  file: File
+): Promise<ApiResult<KnowledgeImportTask>> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.post(`/api/knowledge-bases/${knowledgeBaseId}/documents/file/async`, formData);
 };
 
 export const deleteKnowledgeBase = (knowledgeBaseId: number): Promise<ApiResult<void>> => {
@@ -90,6 +126,19 @@ export const listKnowledgeChunks = (
   documentId: number
 ): Promise<ApiResult<KnowledgeChunk[]>> => {
   return api.get(`/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/chunks`);
+};
+
+export const getKnowledgeImportTask = (
+  knowledgeBaseId: number,
+  taskId: number
+): Promise<ApiResult<KnowledgeImportTask>> => {
+  return api.get(`/api/knowledge-bases/${knowledgeBaseId}/import-tasks/${taskId}`);
+};
+
+export const listKnowledgeImportTasks = (
+  knowledgeBaseId: number
+): Promise<ApiResult<KnowledgeImportTask[]>> => {
+  return api.get(`/api/knowledge-bases/${knowledgeBaseId}/import-tasks`);
 };
 
 export const rebuildKnowledgeBaseEmbeddings = (

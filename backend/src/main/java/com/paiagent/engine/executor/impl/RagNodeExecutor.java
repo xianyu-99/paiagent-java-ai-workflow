@@ -167,11 +167,27 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             return "未检索到相关知识片段。";
         }
         return chunks.stream()
-                .map(chunk -> String.format("[片段 %s, score=%.4f]\n%s",
-                        chunk.getChunkIndex() + 1,
+                .map(chunk -> String.format("[%s, score=%.4f, vector=%.4f, keyword=%.4f]\n%s",
+                        buildCitation(chunk),
                         chunk.getScore(),
+                        chunk.getVectorScore(),
+                        chunk.getKeywordScore(),
                         chunk.getContent()))
                 .collect(Collectors.joining("\n\n---\n\n"));
+    }
+
+    private String buildCitation(RetrievedChunk chunk) {
+        StringBuilder citation = new StringBuilder("片段 ").append(chunk.getChunkIndex() + 1);
+        if (StringUtils.hasText(chunk.getSourceName())) {
+            citation.append(", file=").append(chunk.getSourceName());
+        }
+        if (chunk.getPageNumber() != null) {
+            citation.append(", page=").append(chunk.getPageNumber());
+        }
+        if (StringUtils.hasText(chunk.getSectionTitle())) {
+            citation.append(", section=").append(chunk.getSectionTitle());
+        }
+        return citation.toString();
     }
 
     private Long toLong(Object value) {

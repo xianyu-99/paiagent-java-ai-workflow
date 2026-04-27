@@ -7,6 +7,7 @@ import com.paiagent.dto.KnowledgeBaseRequest;
 import com.paiagent.dto.KnowledgeBaseResponse;
 import com.paiagent.dto.KnowledgeChunkResponse;
 import com.paiagent.dto.KnowledgeDocumentResponse;
+import com.paiagent.dto.KnowledgeImportTaskResponse;
 import com.paiagent.dto.KnowledgeReindexResponse;
 import com.paiagent.dto.KnowledgeUploadRequest;
 import com.paiagent.service.KnowledgeBaseService;
@@ -86,7 +87,7 @@ public class KnowledgeBaseController {
         }
     }
 
-    @Operation(summary = "上传 txt / md 文件")
+    @Operation(summary = "同步上传并导入文件")
     @PostMapping(value = "/{id}/documents/file", consumes = "multipart/form-data")
     public Result<KnowledgeDocumentResponse> uploadFile(@PathVariable Long id,
                                                         @RequestPart("file") MultipartFile file,
@@ -103,6 +104,83 @@ public class KnowledgeBaseController {
         } catch (ForbiddenException e) {
             return Result.forbidden(e.getMessage());
         } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "异步导入纯文本文档")
+    @PostMapping("/{id}/documents/async")
+    public Result<KnowledgeImportTaskResponse> startTextImport(@PathVariable Long id,
+                                                               @Valid @RequestBody KnowledgeUploadRequest body,
+                                                               HttpServletRequest request) {
+        try {
+            return Result.success(knowledgeBaseService.startTextImport(
+                    id,
+                    body.getFileName(),
+                    body.getContent(),
+                    AuthContext.getUserId(request),
+                    AuthContext.isAdmin(request)
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (RuntimeException e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "异步上传并导入文件")
+    @PostMapping(value = "/{id}/documents/file/async", consumes = "multipart/form-data")
+    public Result<KnowledgeImportTaskResponse> startFileImport(@PathVariable Long id,
+                                                               @RequestPart("file") MultipartFile file,
+                                                               HttpServletRequest request) {
+        try {
+            return Result.success(knowledgeBaseService.startFileImport(
+                    id,
+                    file.getOriginalFilename(),
+                    file.getContentType(),
+                    file.getBytes(),
+                    AuthContext.getUserId(request),
+                    AuthContext.isAdmin(request)
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (Exception e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "查询知识导入任务")
+    @GetMapping("/{id}/import-tasks/{taskId}")
+    public Result<KnowledgeImportTaskResponse> getImportTask(@PathVariable Long id,
+                                                             @PathVariable Long taskId,
+                                                             HttpServletRequest request) {
+        try {
+            return Result.success(knowledgeBaseService.getImportTask(
+                    id,
+                    taskId,
+                    AuthContext.getUserId(request),
+                    AuthContext.isAdmin(request)
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (RuntimeException e) {
+            return Result.error(e.getMessage());
+        }
+    }
+
+    @Operation(summary = "查询最近知识导入任务")
+    @GetMapping("/{id}/import-tasks")
+    public Result<List<KnowledgeImportTaskResponse>> listImportTasks(@PathVariable Long id,
+                                                                     HttpServletRequest request) {
+        try {
+            return Result.success(knowledgeBaseService.listImportTasks(
+                    id,
+                    AuthContext.getUserId(request),
+                    AuthContext.isAdmin(request)
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (RuntimeException e) {
             return Result.error(e.getMessage());
         }
     }

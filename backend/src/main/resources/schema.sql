@@ -129,6 +129,30 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表';
 
+-- RAG 知识导入任务表
+CREATE TABLE IF NOT EXISTS knowledge_import_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '导入任务主键 ID',
+    knowledge_base_id BIGINT NOT NULL COMMENT '知识库 ID',
+    owner_id BIGINT NULL COMMENT '上传用户 ID',
+    document_id BIGINT NULL COMMENT '导入成功后的文档 ID',
+    file_name VARCHAR(255) NOT NULL COMMENT '文件名',
+    content_type VARCHAR(150) NULL COMMENT '文档 MIME 类型',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT '任务状态 PENDING/RUNNING/SUCCESS/FAILED',
+    stage VARCHAR(255) NULL COMMENT '当前阶段',
+    progress INT DEFAULT 0 COMMENT '进度百分比',
+    total_chunks INT DEFAULT 0 COMMENT '总切片数',
+    processed_chunks INT DEFAULT 0 COMMENT '已处理切片数',
+    error_message TEXT COMMENT '失败原因',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    completed_at TIMESTAMP NULL COMMENT '完成时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_import_kb_id (knowledge_base_id),
+    INDEX idx_import_owner_id (owner_id),
+    INDEX idx_import_status (status),
+    INDEX idx_import_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识导入任务表';
+
 -- 插入预置节点定义数据
 INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema) VALUES
 ('input', '输入', 'IO', '📥',

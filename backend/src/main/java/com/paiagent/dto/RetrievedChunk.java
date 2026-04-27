@@ -17,5 +17,15 @@ public class RetrievedChunk {
 
     private String content;
 
+    private String sourceName;
+
+    private String sectionTitle;
+
+    private Integer pageNumber;
+
     private Double score;
+
+    private Double vectorScore;
+
+    private Double keywordScore;
 }

@@ -24,6 +24,7 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         createKnowledgeChunkTable();
         migrateKnowledgeChunkEmbeddingMetadata();
         migrateKnowledgeChunkSourceMetadata();
+        createKnowledgeImportTaskTable();
         upsertRagNodeDefinition();
     }
 
@@ -122,6 +123,33 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE knowledge_chunk ADD COLUMN end_offset INT NULL AFTER start_offset");
         addIndexIfMissing("knowledge_chunk", "idx_chunk_doc_page",
                 "ALTER TABLE knowledge_chunk ADD INDEX idx_chunk_doc_page (document_id, page_number, chunk_index)");
+    }
+
+    private void createKnowledgeImportTaskTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_import_task (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    knowledge_base_id BIGINT NOT NULL,
+                    owner_id BIGINT NULL,
+                    document_id BIGINT NULL,
+                    file_name VARCHAR(255) NOT NULL,
+                    content_type VARCHAR(150) NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+                    stage VARCHAR(255) NULL,
+                    progress INT DEFAULT 0,
+                    total_chunks INT DEFAULT 0,
+                    processed_chunks INT DEFAULT 0,
+                    error_message TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP NULL,
+                    deleted TINYINT DEFAULT 0,
+                    INDEX idx_import_kb_id (knowledge_base_id),
+                    INDEX idx_import_owner_id (owner_id),
+                    INDEX idx_import_status (status),
+                    INDEX idx_import_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识导入任务表'
+                """);
     }
 
     private void addColumnIfMissing(String tableName, String columnName, String ddl) {

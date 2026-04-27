@@ -191,11 +191,12 @@ public class DocumentParsingService {
                 || normalized.contains("标题");
     }
 
-    private String detectContentType(String fileName, String contentType) {
+    public String detectContentType(String fileName, String contentType) {
+        String safeName = StringUtils.hasText(fileName) ? fileName.trim() : "untitled.txt";
         if (StringUtils.hasText(contentType) && !"application/octet-stream".equalsIgnoreCase(contentType)) {
             return contentType;
         }
-        String lower = fileName.toLowerCase(Locale.ROOT);
+        String lower = safeName.toLowerCase(Locale.ROOT);
         if (lower.endsWith(".pdf")) {
             return "application/pdf";
         }

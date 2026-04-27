@@ -1,19 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Empty, Input, List, Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Upload, message } from 'antd';
+import { Button, Card, Empty, Input, List, Modal, Popconfirm, Progress, Select, Space, Table, Tabs, Tag, Upload, message } from 'antd';
 import { ArrowLeftOutlined, DeleteOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import {
   createKnowledgeBase,
   deleteKnowledgeBase,
+  getKnowledgeImportTask,
   KnowledgeBase,
   KnowledgeChunk,
   KnowledgeDocument,
+  KnowledgeImportTask,
   listKnowledgeBases,
   listKnowledgeChunks,
   listKnowledgeDocuments,
+  listKnowledgeImportTasks,
   rebuildKnowledgeBaseEmbeddings,
-  uploadKnowledgeDocument,
-  uploadKnowledgeFile,
+  startKnowledgeFileImport,
+  startKnowledgeTextImport,
 } from '../api/knowledge';
 
 const KnowledgeBasePage = () => {
@@ -22,6 +25,8 @@ const KnowledgeBasePage = () => {
   const [selectedKnowledgeBaseId, setSelectedKnowledgeBaseId] = useState<number>();
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [chunks, setChunks] = useState<KnowledgeChunk[]>([]);
+  const [importTasks, setImportTasks] = useState<KnowledgeImportTask[]>([]);
+  const [activeImportTask, setActiveImportTask] = useState<KnowledgeImportTask | null>(null);
   const [chunksModalOpen, setChunksModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newDescription, setNewDescription] = useState('');
@@ -65,13 +70,61 @@ const KnowledgeBasePage = () => {
     }
   };
 
+  const refreshImportTasks = async (knowledgeBaseId?: number) => {
+    if (!knowledgeBaseId) {
+      setImportTasks([]);
+      return;
+    }
+    const response = await listKnowledgeImportTasks(knowledgeBaseId);
+    if (response.code === 200) {
+      const tasks = response.data || [];
+      setImportTasks(tasks);
+      const runningTask = tasks.find((task) => task.status === 'PENDING' || task.status === 'RUNNING');
+      setActiveImportTask((current) => {
+        if (current?.knowledgeBaseId === knowledgeBaseId && ['PENDING', 'RUNNING'].includes(current.status)) {
+          return current;
+        }
+        return runningTask || tasks[0] || null;
+      });
+    }
+  };
+
   useEffect(() => {
     refreshKnowledgeBases();
   }, []);
 
   useEffect(() => {
     refreshDocuments(selectedKnowledgeBaseId);
+    refreshImportTasks(selectedKnowledgeBaseId);
   }, [selectedKnowledgeBaseId]);
+
+  useEffect(() => {
+    if (!selectedKnowledgeBaseId || !activeImportTask || !['PENDING', 'RUNNING'].includes(activeImportTask.status)) {
+      return;
+    }
+
+    const timer = window.setInterval(async () => {
+      const response = await getKnowledgeImportTask(selectedKnowledgeBaseId, activeImportTask.id);
+      if (response.code !== 200) {
+        return;
+      }
+      const task = response.data;
+      setActiveImportTask(task);
+      setImportTasks((tasks) => [task, ...tasks.filter((item) => item.id !== task.id)].slice(0, 10));
+      if (task.status === 'SUCCESS') {
+        message.success(`${task.fileName} 导入完成`);
+        await refreshKnowledgeBases();
+        await refreshDocuments(selectedKnowledgeBaseId);
+        await refreshImportTasks(selectedKnowledgeBaseId);
+      }
+      if (task.status === 'FAILED') {
+        message.error(task.errorMessage || `${task.fileName} 导入失败`);
+        await refreshImportTasks(selectedKnowledgeBaseId);
+      }
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [selectedKnowledgeBaseId, activeImportTask]);
 
   const handleCreateKnowledgeBase = async () => {
     if (!newName.trim()) {
@@ -117,17 +170,17 @@ const KnowledgeBasePage = () => {
     }
     setUploading(true);
     try {
-      const response = await uploadKnowledgeDocument(selectedKnowledgeBaseId, {
+      const response = await startKnowledgeTextImport(selectedKnowledgeBaseId, {
         fileName: pasteFileName || 'manual.md',
         content: pasteContent,
       });
       if (response.code === 200) {
-        message.success(`导入成功，生成 ${response.data.chunkCount} 个 chunk`);
+        message.success('已创建异步导入任务');
+        setActiveImportTask(response.data);
+        setImportTasks((tasks) => [response.data, ...tasks.filter((task) => task.id !== response.data.id)].slice(0, 10));
         setPasteContent('');
-        await refreshKnowledgeBases();
-        await refreshDocuments(selectedKnowledgeBaseId);
       } else {
-        message.error(response.message || '导入失败');
+        message.error(response.message || '创建导入任务失败');
       }
     } finally {
       setUploading(false);
@@ -145,14 +198,14 @@ const KnowledgeBasePage = () => {
     }
     setUploading(true);
     try {
-      const response = await uploadKnowledgeFile(selectedKnowledgeBaseId, localFile);
+      const response = await startKnowledgeFileImport(selectedKnowledgeBaseId, localFile);
       if (response.code === 200) {
-        message.success(`文件导入成功，生成 ${response.data.chunkCount} 个 chunk`);
+        message.success('已创建文件导入任务');
+        setActiveImportTask(response.data);
+        setImportTasks((tasks) => [response.data, ...tasks.filter((task) => task.id !== response.data.id)].slice(0, 10));
         setLocalFile(null);
-        await refreshKnowledgeBases();
-        await refreshDocuments(selectedKnowledgeBaseId);
       } else {
-        message.error(response.message || '文件导入失败');
+        message.error(response.message || '创建文件导入任务失败');
       }
     } finally {
       setUploading(false);
@@ -186,6 +239,18 @@ const KnowledgeBasePage = () => {
     } else {
       message.error(response.message || 'chunk 加载失败');
     }
+  };
+
+  const importProgressStatus = activeImportTask?.status === 'FAILED'
+    ? 'exception'
+    : activeImportTask?.status === 'SUCCESS'
+      ? 'success'
+      : 'active';
+
+  const renderTaskStatus = (status: KnowledgeImportTask['status']) => {
+    const color = status === 'SUCCESS' ? 'green' : status === 'FAILED' ? 'red' : 'blue';
+    const label = status === 'PENDING' ? '等待中' : status === 'RUNNING' ? '导入中' : status === 'SUCCESS' ? '成功' : '失败';
+    return <Tag color={color}>{label}</Tag>;
   };
 
   return (
@@ -284,6 +349,67 @@ const KnowledgeBasePage = () => {
               ]}
             />
           </Card>
+
+          {activeImportTask && (
+            <Card title="当前导入进度">
+              <Space direction="vertical" className="w-full">
+                <div className="flex items-center justify-between">
+                  <Space>
+                    <span className="font-medium">{activeImportTask.fileName}</span>
+                    {renderTaskStatus(activeImportTask.status)}
+                  </Space>
+                  <span className="text-gray-500 text-sm">
+                    {activeImportTask.processedChunks || 0} / {activeImportTask.totalChunks || 0} chunks
+                  </span>
+                </div>
+                <Progress
+                  percent={activeImportTask.progress || 0}
+                  status={importProgressStatus}
+                />
+                <div className="text-sm text-gray-600">
+                  {activeImportTask.stage || '等待导入'}
+                </div>
+                {activeImportTask.errorMessage && (
+                  <div className="text-sm text-red-500 whitespace-pre-wrap">
+                    {activeImportTask.errorMessage}
+                  </div>
+                )}
+              </Space>
+            </Card>
+          )}
+
+          {importTasks.length > 0 && (
+            <Card title="最近导入任务">
+              <Table
+                rowKey="id"
+                dataSource={importTasks}
+                pagination={false}
+                size="small"
+                columns={[
+                  { title: '文件名', dataIndex: 'fileName' },
+                  {
+                    title: '状态',
+                    dataIndex: 'status',
+                    width: 100,
+                    render: (status: KnowledgeImportTask['status']) => renderTaskStatus(status),
+                  },
+                  {
+                    title: '进度',
+                    width: 180,
+                    render: (_, record) => (
+                      <Progress percent={record.progress || 0} size="small" status={record.status === 'FAILED' ? 'exception' : undefined} />
+                    ),
+                  },
+                  { title: '阶段', dataIndex: 'stage' },
+                  {
+                    title: 'Chunk',
+                    width: 120,
+                    render: (_, record) => `${record.processedChunks || 0}/${record.totalChunks || 0}`,
+                  },
+                ]}
+              />
+            </Card>
+          )}
 
           <Card
             title="文档与 Chunk"
