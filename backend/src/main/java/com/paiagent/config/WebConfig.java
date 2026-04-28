@@ -19,7 +19,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Autowired
     private AuthInterceptor authInterceptor;
 
-    @Value("${paiagent.cors.allowed-origin-patterns:http://localhost:*,http://127.0.0.1:*}")
+    @Value("${paiagent.cors.allowed-origin-patterns:http://localhost:*,http://127.0.0.1:*,http://192.168.*:*,http://172.*:*,http://10.*:*}")
     private String allowedOriginPatterns;
     
     @Override
@@ -49,6 +49,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/auth/refresh",
                         "/api/auth/current",
                         "/api/node-types",
+                        "/api/published-workflows/**",
                         "/api/workflows/*/execute/stream",
                         "/swagger-ui/**",
                         "/v3/api-docs/**"

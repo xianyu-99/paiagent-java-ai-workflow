@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload } from 'antd';
-import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined, DatabaseOutlined } from '@ant-design/icons';
+import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload, Space } from 'antd';
+import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined, DatabaseOutlined, ShareAltOutlined, CopyOutlined, LinkOutlined, ApiOutlined } from '@ant-design/icons';
 import { Edge, MarkerType, Node } from '@xyflow/react';
 import NodePanel from '../components/NodePanel';
 import FlowCanvas from '../components/FlowCanvas';
@@ -11,7 +11,18 @@ import { logout } from '../api/auth';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useAuthStore } from '../store/authStore';
 import { useLLMConfigStore } from '../store/llmConfigStore';
-import { createWorkflow, updateWorkflow, getWorkflows, getWorkflow, deleteWorkflow, Workflow } from '../api/workflow';
+import {
+  createWorkflow,
+  updateWorkflow,
+  getWorkflows,
+  getWorkflow,
+  deleteWorkflow,
+  getWorkflowPublish,
+  publishWorkflow,
+  unpublishWorkflow,
+  Workflow,
+  WorkflowPublish,
+} from '../api/workflow';
 import {
   createKnowledgeBase,
   listKnowledgeBases,
@@ -105,6 +116,9 @@ const EditorPage = () => {
   const [loadModalOpen, setLoadModalOpen] = useState(false);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loadingWorkflows, setLoadingWorkflows] = useState(false);
+  const [publishModalOpen, setPublishModalOpen] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishInfo, setPublishInfo] = useState<WorkflowPublish | null>(null);
   const hasLoadedRef = useRef<number | null>(null);
   
   // LLM 节点配置状态
@@ -280,6 +294,23 @@ const EditorPage = () => {
     refreshKnowledgeBases();
   }, [refreshKnowledgeBases]);
 
+  const refreshPublishStatus = useCallback(async (workflowId?: number | null) => {
+    if (!workflowId) {
+      setPublishInfo(null);
+      return;
+    }
+
+    try {
+      const result = await getWorkflowPublish(workflowId);
+      if (result.code === 200) {
+        setPublishInfo(result.data || null);
+      }
+    } catch (error) {
+      console.error('加载发布状态失败:', error);
+      setPublishInfo(null);
+    }
+  }, []);
+
   // 当全局配置异步加载完成后，补齐当前选中节点的展示配置
   useEffect(() => {
     if (!selectedNode) return;
@@ -335,6 +366,7 @@ const EditorPage = () => {
           },
         }));
         setEdges(loadedEdges);
+        await refreshPublishStatus(workflow.id);
         
         // 恢复输出节点配置
         const outputNode = loadedNodes.find((node) => node.data?.type === 'output');
@@ -352,7 +384,7 @@ const EditorPage = () => {
     } catch {
       message.error('工作流加载失败');
     }
-  }, [setCurrentWorkflowId, setEdges, setNodes]);
+  }, [refreshPublishStatus, setCurrentWorkflowId, setEdges, setNodes]);
 
   // 从 URL 加载工作流
   useEffect(() => {
@@ -366,18 +398,23 @@ const EditorPage = () => {
       return;
     }
     hasLoadedRef.current = null;
+    setPublishInfo(null);
   }, [id, loadWorkflowById]);
 
-  // 保存工作流
-  const handleSave = async () => {
-    if (nodes.length === 0) {
+  const persistWorkflowSnapshot = async (
+    nodesSnapshot: Node[] = useWorkflowStore.getState().nodes,
+    edgesSnapshot: Edge[] = useWorkflowStore.getState().edges,
+    successMessage = '工作流保存成功',
+    failureMessage = '保存失败'
+  ): Promise<number | null> => {
+    if (nodesSnapshot.length === 0) {
       message.warning('工作流为空,无法保存');
-      return;
+      return null;
     }
 
     const flowData = JSON.stringify({
-      nodes: serializeWorkflowNodes(nodes),
-      edges: edges.map((edge) => ({
+      nodes: serializeWorkflowNodes(nodesSnapshot),
+      edges: edgesSnapshot.map((edge) => ({
         id: edge.id,
         source: edge.source,
         target: edge.target,
@@ -388,14 +425,21 @@ const EditorPage = () => {
 
     setSaving(true);
     try {
-      if (currentWorkflowId) {
+      const workflowId = useWorkflowStore.getState().currentWorkflowId;
+      if (workflowId) {
         // 更新
-        await updateWorkflow(currentWorkflowId, {
+        const result = await updateWorkflow(workflowId, {
           name: workflowName,
           flowData,
           engineType,
         });
-        message.success('工作流保存成功');
+        if (result.code !== 200) {
+          message.error(result.message || failureMessage);
+          return null;
+        }
+        message.success(successMessage);
+        await refreshPublishStatus(workflowId);
+        return workflowId;
       } else {
         // 创建
         const result = await createWorkflow({
@@ -409,14 +453,33 @@ const EditorPage = () => {
           setCurrentWorkflowId(workflowId);
           // 更新 URL
           navigate(`/editor/${workflowId}`, { replace: true });
+          setPublishInfo(null);
           message.success('工作流创建成功');
+          return workflowId;
         }
+        message.error(result.message || failureMessage);
       }
     } catch {
-      message.error('保存失败');
+      message.error(failureMessage);
+      return null;
     } finally {
       setSaving(false);
     }
+    return null;
+  };
+
+  // 保存工作流
+  const handleSave = async (): Promise<number | null> => {
+    return persistWorkflowSnapshot(nodes, edges);
+  };
+
+  const persistNodeConfig = async () => {
+    return persistWorkflowSnapshot(
+      useWorkflowStore.getState().nodes,
+      useWorkflowStore.getState().edges,
+      '配置已保存到工作流',
+      '配置已暂存到画布，但保存到后端失败'
+    );
   };
 
   // 打开调试抽屉
@@ -426,6 +489,69 @@ const EditorPage = () => {
       return;
     }
     setDebugDrawerOpen(true);
+  };
+
+  const toAbsoluteUrl = (path?: string) => {
+    if (!path) {
+      return '';
+    }
+    if (/^https?:\/\//.test(path)) {
+      return path;
+    }
+    return `${window.location.origin}${path.startsWith('/') ? path : `/${path}`}`;
+  };
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success('已复制');
+    } catch {
+      message.error('复制失败');
+    }
+  };
+
+  const handlePublishWorkflow = async () => {
+    const workflowId = await handleSave();
+    if (!workflowId) {
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const result = await publishWorkflow(workflowId);
+      if (result.code === 200) {
+        setPublishInfo(result.data);
+        setPublishModalOpen(true);
+        message.success('工作流已发布');
+      } else {
+        message.error(result.message || '发布失败');
+      }
+    } catch {
+      message.error('发布失败');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const handleUnpublishWorkflow = async () => {
+    if (!currentWorkflowId) {
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const result = await unpublishWorkflow(currentWorkflowId);
+      if (result.code === 200) {
+        setPublishInfo(result.data || null);
+        message.success('已取消发布');
+      } else {
+        message.error(result.message || '取消发布失败');
+      }
+    } catch {
+      message.error('取消发布失败');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   // 登出
@@ -509,7 +635,7 @@ const EditorPage = () => {
   };
 
   // 保存输出节点配置
-  const handleSaveOutputConfig = () => {
+  const handleSaveOutputConfig = async () => {
     if (!selectedNode) return;
 
     // 验证参数配置
@@ -561,7 +687,7 @@ const EditorPage = () => {
     });
 
     useWorkflowStore.getState().updateNode(selectedNode.id, updatedData);
-    message.success('配置保存成功');
+    await persistNodeConfig();
   };
 
   // 打开加载工作流对话框
@@ -636,7 +762,7 @@ const EditorPage = () => {
   };
 
   // 保存 LLM 节点配置
-  const handleSaveLlmConfig = () => {
+  const handleSaveLlmConfig = async () => {
     if (!selectedNode) return;
 
     // 验证输入参数
@@ -715,7 +841,7 @@ const EditorPage = () => {
     };
 
     useWorkflowStore.getState().updateNode(selectedNode.id, updatedData);
-    message.success('配置保存成功');
+    await persistNodeConfig();
   };
 
   // 添加 LLM 输入参数
@@ -736,7 +862,7 @@ const EditorPage = () => {
   };
 
   // 保存 TTS 节点配置
-  const handleSaveTtsConfig = () => {
+  const handleSaveTtsConfig = async () => {
     if (!selectedNode) return;
 
     if (!ttsConfig.apiKey && !ttsConfig.apiKeyConfigured) {
@@ -784,7 +910,7 @@ const EditorPage = () => {
     };
 
     useWorkflowStore.getState().updateNode(selectedNode.id, updatedData);
-    message.success('配置保存成功');
+    await persistNodeConfig();
   };
 
   // 添加 TTS 输入参数
@@ -821,7 +947,7 @@ const EditorPage = () => {
     setTtsOutputParams(newParams);
   };
 
-  const handleSaveConditionConfig = () => {
+  const handleSaveConditionConfig = async () => {
     if (!selectedNode) return;
 
     if (conditionConfig.leftType === 'reference' && !conditionConfig.leftReference) {
@@ -841,10 +967,10 @@ const EditorPage = () => {
       ...selectedNode.data,
       ...conditionConfig,
     });
-    message.success('条件配置保存成功');
+    await persistNodeConfig();
   };
 
-  const handleSaveRagConfig = () => {
+  const handleSaveRagConfig = async () => {
     if (!selectedNode) return;
     if (!ragConfig.knowledgeBaseId) {
       message.warning('请选择知识库');
@@ -877,7 +1003,7 @@ const EditorPage = () => {
       ],
       outputParams: [{ name: 'output', type: 'string' }]
     });
-    message.success('RAG 节点配置保存成功');
+    await persistNodeConfig();
   };
 
   const handleCreateKnowledgeBase = async () => {
@@ -1211,6 +1337,14 @@ const EditorPage = () => {
             size="large"
           >
             保存
+          </Button>
+          <Button
+            icon={<ShareAltOutlined />}
+            onClick={handlePublishWorkflow}
+            loading={publishing}
+            size="large"
+          >
+            {publishInfo?.enabled ? '已发布' : '发布'}
           </Button>
           <Button
             type="primary"
@@ -1983,7 +2117,7 @@ const EditorPage = () => {
                             children: (
                               <>
                                 <Upload
-                                  accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                  accept=".txt,.md,.markdown,.json,.pdf,.doc,.docx,text/plain,text/markdown,application/json,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                   maxCount={1}
                                   beforeUpload={(file) => {
                                     setKnowledgeLocalFile(file);
@@ -1999,7 +2133,7 @@ const EditorPage = () => {
                                   }] : []}
                                 >
                                   <Button icon={<UploadOutlined />} block>
-                                    选择本地 txt / md / pdf / docx 文件
+                                    选择本地 txt / md / json / pdf / doc / docx 文件
                                   </Button>
                                 </Upload>
                                 <Button
@@ -2139,6 +2273,64 @@ const EditorPage = () => {
         open={debugDrawerOpen}
         onClose={() => setDebugDrawerOpen(false)}
       />
+
+      <Modal
+        title="发布工作流"
+        open={publishModalOpen}
+        onCancel={() => setPublishModalOpen(false)}
+        footer={publishInfo?.enabled ? [
+          <Button key="unpublish" danger loading={publishing} onClick={handleUnpublishWorkflow}>
+            取消发布
+          </Button>,
+          <Button key="close" onClick={() => setPublishModalOpen(false)}>
+            关闭
+          </Button>
+        ] : [
+          <Button key="close" onClick={() => setPublishModalOpen(false)}>
+            关闭
+          </Button>
+        ]}
+        width={720}
+      >
+        {publishInfo?.enabled ? (
+          <Space direction="vertical" className="w-full" size="middle">
+            <div>
+              <div className="text-sm text-gray-500 mb-2">公开页面</div>
+              <Input
+                readOnly
+                value={toAbsoluteUrl(publishInfo.publicPagePath)}
+                addonBefore={<LinkOutlined />}
+                addonAfter={
+                  <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => copyText(toAbsoluteUrl(publishInfo.publicPagePath))}>
+                    复制
+                  </Button>
+                }
+              />
+            </div>
+            <div>
+              <div className="text-sm text-gray-500 mb-2">API POST 调用地址</div>
+              <Input
+                readOnly
+                value={toAbsoluteUrl(publishInfo.publicApiPath)}
+                addonBefore={<ApiOutlined />}
+                addonAfter={
+                  <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => copyText(toAbsoluteUrl(publishInfo.publicApiPath))}>
+                    复制
+                  </Button>
+                }
+              />
+              <div className="text-xs text-gray-500 mt-2">
+                这是给程序调用的接口，浏览器地址栏不能直接打开。POST JSON: {`{ "inputData": "你的输入" }`}
+              </div>
+            </div>
+            <Button type="primary" onClick={() => window.open(toAbsoluteUrl(publishInfo.publicPagePath), '_blank')}>
+              打开公开页面
+            </Button>
+          </Space>
+        ) : (
+          <div className="text-gray-500">当前工作流尚未发布。</div>
+        )}
+      </Modal>
 
       {/* 加载工作流对话框 */}
       <Modal

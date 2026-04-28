@@ -16,11 +16,13 @@ public class MinioConfig {
     private String secretKey;
     private String bucketName;
     private String publicUrl;
+    private String region = "us-east-1";
     
     @Bean
     public MinioClient minioClient() {
         return MinioClient.builder()
                 .endpoint(endpoint)
+                .region(region)
                 .credentials(accessKey, secretKey)
                 .build();
     }

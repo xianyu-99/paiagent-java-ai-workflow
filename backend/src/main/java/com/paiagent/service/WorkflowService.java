@@ -94,6 +94,15 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         return workflow;
     }
 
+    public Workflow getWorkflowForPublishedExecution(Long id) {
+        Workflow workflow = this.getById(id);
+        if (workflow == null) {
+            throw new RuntimeException("工作流不存在或已删除");
+        }
+        workflow.setFlowData(apiKeyCryptoService.decryptApiKeysInJson(workflow.getFlowData()));
+        return workflow;
+    }
+
     private WorkflowResponse toResponse(Workflow workflow) {
         WorkflowResponse response = new WorkflowResponse();
         BeanUtils.copyProperties(workflow, response);

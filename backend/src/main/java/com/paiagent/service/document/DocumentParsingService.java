@@ -1,8 +1,12 @@
 package com.paiagent.service.document;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONWriter;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.xwpf.usermodel.IBodyElement;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -37,14 +41,17 @@ public class DocumentParsingService {
                     || "application/vnd.openxmlformats-officedocument.wordprocessingml.document".equalsIgnoreCase(contentType)) {
                 return parseDocx(safeName, detectedType, bytes);
             }
-            if (lowerName.endsWith(".doc")) {
-                throw new IllegalArgumentException("暂不支持旧版 .doc，请另存为 .docx 后上传");
+            if (lowerName.endsWith(".doc") || "application/msword".equalsIgnoreCase(contentType)) {
+                return parseDoc(safeName, detectedType, bytes);
+            }
+            if (lowerName.endsWith(".json") || "application/json".equalsIgnoreCase(contentType)) {
+                return parseJson(safeName, detectedType, bytes);
             }
             return parsePlainOrMarkdown(safeName, detectedType, new String(bytes, StandardCharsets.UTF_8));
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("文档解析失败: " + e.getMessage(), e);
+            throw new IllegalArgumentException("Document parse failed: " + e.getMessage(), e);
         }
     }
 
@@ -117,6 +124,37 @@ public class DocumentParsingService {
         }
         flushSegment(segments, fileName, contentType, currentTitle, null, segmentStart, currentText, rawText);
         return new ParsedDocument(fileName, contentType, "poi-docx", rawText.toString().trim(), segments);
+    }
+
+    private ParsedDocument parseDoc(String fileName, String contentType, byte[] bytes) throws Exception {
+        StringBuilder rawText = new StringBuilder();
+        try (HWPFDocument document = new HWPFDocument(new ByteArrayInputStream(bytes));
+             WordExtractor extractor = new WordExtractor(document)) {
+            for (String paragraph : extractor.getParagraphText()) {
+                String text = normalize(paragraph);
+                if (StringUtils.hasText(text)) {
+                    rawText.append(text).append("\n\n");
+                }
+            }
+        }
+        String text = rawText.toString().trim();
+        List<ParsedSegment> segments = new ArrayList<>();
+        if (StringUtils.hasText(text)) {
+            segments.add(new ParsedSegment(text, fileName, contentType, null, null, 0, text.length()));
+        }
+        return new ParsedDocument(fileName, contentType, "poi-doc", text, segments);
+    }
+
+    private ParsedDocument parseJson(String fileName, String contentType, byte[] bytes) {
+        String rawJson = new String(bytes, StandardCharsets.UTF_8);
+        try {
+            Object parsed = JSON.parse(rawJson);
+            String prettyJson = JSON.toJSONString(parsed, JSONWriter.Feature.PrettyFormat);
+            ParsedDocument document = parsePlainOrMarkdown(fileName, contentType, prettyJson);
+            return new ParsedDocument(fileName, contentType, "json", document.rawText(), document.segments());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("JSON document parse failed: " + e.getMessage(), e);
+        }
     }
 
     private ParsedDocument parsePlainOrMarkdown(String fileName, String contentType, String content) {
@@ -202,6 +240,12 @@ public class DocumentParsingService {
         }
         if (lower.endsWith(".docx")) {
             return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+        }
+        if (lower.endsWith(".doc")) {
+            return "application/msword";
+        }
+        if (lower.endsWith(".json")) {
+            return "application/json";
         }
         if (lower.endsWith(".md") || lower.endsWith(".markdown")) {
             return "text/markdown";

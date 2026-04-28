@@ -327,7 +327,7 @@ const KnowledgeBasePage = () => {
                   children: (
                     <Space direction="vertical" className="w-full">
                       <Upload
-                        accept=".txt,.md,.markdown,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        accept=".txt,.md,.markdown,.json,.pdf,.doc,.docx,text/plain,text/markdown,application/json,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         maxCount={1}
                         beforeUpload={(file) => {
                           setLocalFile(file);
@@ -336,7 +336,7 @@ const KnowledgeBasePage = () => {
                         onRemove={() => setLocalFile(null)}
                         fileList={localFile ? [{ uid: localFile.name, name: localFile.name, status: 'done' }] : []}
                       >
-                        <Button icon={<UploadOutlined />}>选择 txt / md / pdf / docx 文件</Button>
+                        <Button icon={<UploadOutlined />}>选择 txt / md / json / pdf / doc / docx 文件</Button>
                       </Upload>
                       <Button type="primary" loading={uploading} onClick={handleFileUpload}>
                         上传文件并切片

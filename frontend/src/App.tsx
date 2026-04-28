@@ -7,6 +7,7 @@ import { useAuthStore } from './store/authStore';
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 const EditorPage = lazy(() => import('./pages/EditorPage'));
 const KnowledgeBasePage = lazy(() => import('./pages/KnowledgeBasePage'));
+const PublishedWorkflowPage = lazy(() => import('./pages/PublishedWorkflowPage'));
 
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
   const { isAuthenticated } = useAuthStore();
@@ -31,6 +32,7 @@ function App() {
         >
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/p/:shareKey" element={<PublishedWorkflowPage />} />
             <Route path="/editor" element={<ProtectedRoute><EditorPage /></ProtectedRoute>} />
             <Route path="/editor/:id" element={<ProtectedRoute><EditorPage /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute><KnowledgeBasePage /></ProtectedRoute>} />

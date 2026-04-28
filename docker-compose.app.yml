@@ -23,6 +23,7 @@ services:
       MINIO_PUBLIC_URL: ${EXTERNAL_MINIO_PUBLIC_URL:-http://localhost:9000}
       JWT_SECRET: ${JWT_SECRET:-paiagent_external_jwt_secret_change_me_minimum_32_chars}
       API_KEY_ENCRYPTION_SECRET: ${API_KEY_ENCRYPTION_SECRET:-paiagent_external_api_key_crypto_secret_change_me_32_chars}
+      PAIAGENT_CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:*,http://127.0.0.1:*,http://192.168.*:*,http://172.*:*,http://10.*:*}
       APP_AUTH_DEFAULT_USERNAME: ${APP_AUTH_DEFAULT_USERNAME:-admin}
       APP_AUTH_DEFAULT_PASSWORD: ${APP_AUTH_DEFAULT_PASSWORD:-admin123}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-placeholder}

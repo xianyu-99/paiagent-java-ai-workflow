@@ -1,22 +1,22 @@
 import {
-    Background,
-    Connection,
-    Controls,
-    Handle,
-    MarkerType,
-    MiniMap,
-    Node,
-    NodeProps,
-    OnConnect,
-    OnEdgesChange,
-    OnNodesChange,
-    Position,
-    ReactFlow,
-    ReactFlowProvider,
-    addEdge,
-    useEdgesState,
-    useNodesState,
-    useReactFlow,
+  Background,
+  Connection,
+  Controls,
+  Handle,
+  MarkerType,
+  MiniMap,
+  Node,
+  NodeProps,
+  OnConnect,
+  OnEdgesChange,
+  OnNodesChange,
+  Position,
+  ReactFlow,
+  ReactFlowProvider,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  useReactFlow,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useCallback, useEffect } from 'react';
@@ -30,27 +30,36 @@ const ConditionNode = ({ data, selected }: NodeProps) => {
   const label = typeof data?.label === 'string' ? data.label : '条件分支';
 
   return (
-    <div className={`relative px-4 py-3 rounded-lg border-2 bg-white shadow-sm min-w-[150px] ${selected ? 'border-blue-500' : 'border-orange-300'}`}>
-      <Handle type="target" position={Position.Top} />
-      <div className="text-center">
-        <div className="text-lg">🔀</div>
-        <div className="font-semibold text-gray-800">{label}</div>
+    <div className="relative w-[178px] h-[178px] flex items-center justify-center overflow-visible">
+      <div
+        className={`absolute left-1/2 top-1/2 h-[122px] w-[122px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[6px] border-2 bg-white shadow-sm ${
+          selected ? 'border-blue-500 shadow-blue-100' : 'border-orange-400'
+        }`}
+      />
+      <Handle
+        type="target"
+        position={Position.Top}
+        style={{ top: 5, background: '#111827', zIndex: 20 }}
+      />
+      <div className="relative z-10 w-[112px] text-center">
+        <div className="text-xs font-semibold uppercase tracking-wide text-orange-500">if</div>
+        <div className="text-base font-semibold text-gray-900 leading-snug break-words">{label}</div>
         <div className="text-xs text-gray-500 mt-1">true / false</div>
       </div>
       <Handle
         id="true"
         type="source"
         position={Position.Right}
-        style={{ top: '38%', background: '#16a34a' }}
+        style={{ top: '50%', right: 5, background: '#16a34a', zIndex: 20 }}
       />
       <Handle
         id="false"
         type="source"
-        position={Position.Right}
-        style={{ top: '72%', background: '#dc2626' }}
+        position={Position.Bottom}
+        style={{ bottom: 5, background: '#dc2626', zIndex: 20 }}
       />
-      <div className="absolute -right-12 top-[28%] text-xs text-green-600 bg-white px-1">true</div>
-      <div className="absolute -right-12 top-[62%] text-xs text-red-600 bg-white px-1">false</div>
+      <div className="absolute -right-9 top-1/2 -translate-y-1/2 text-xs text-green-600 bg-white px-1">true</div>
+      <div className="absolute left-1/2 -translate-x-1/2 -bottom-1 text-xs text-red-600 bg-white px-1">false</div>
     </div>
   );
 };
@@ -66,7 +75,6 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
   const [nodes, setNodes, onNodesChange] = useNodesState(storeNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(storeEdges);
 
-  // 当 store 中的 nodes/edges 变化时，同步更新到本地状态
   useEffect(() => {
     console.log('Store nodes changed:', storeNodes);
     setNodes(storeNodes);
@@ -85,10 +93,8 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
     setEdges(edgesWithMarkers);
   }, [storeEdges, setEdges]);
 
-  // 同步到 store
   const handleNodesChange: OnNodesChange = useCallback((changes) => {
     onNodesChange(changes);
-    // 使用 setTimeout 确保状态更新后再同步
     setTimeout(() => {
       setNodes((currentNodes) => {
         setStoreNodes(currentNodes);
@@ -125,7 +131,6 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
     });
   }, [setEdges, setStoreEdges]);
 
-  // 处理拖拽放置
   const onDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
@@ -140,8 +145,8 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
         y: event.clientY,
       });
       const position = {
-        x: flowPosition.x - 75,
-        y: flowPosition.y - 25,
+        x: flowPosition.x - (type === 'condition' ? 89 : 75),
+        y: flowPosition.y - (type === 'condition' ? 89 : 25),
       };
 
       const newNode: Node = {

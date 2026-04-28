@@ -36,6 +36,23 @@ CREATE TABLE IF NOT EXISTS workflow (
     INDEX idx_updated_at (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流表';
 
+CREATE TABLE IF NOT EXISTS workflow_publish (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '发布记录主键 ID',
+    workflow_id BIGINT NOT NULL COMMENT '工作流 ID',
+    share_key VARCHAR(64) NOT NULL COMMENT '公开访问密钥',
+    title VARCHAR(255) NOT NULL COMMENT '公开标题',
+    description TEXT COMMENT '公开描述',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+    created_by BIGINT NULL COMMENT '发布人用户 ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    UNIQUE KEY uk_publish_share_key (share_key),
+    UNIQUE KEY uk_publish_workflow_id (workflow_id),
+    INDEX idx_publish_enabled (enabled),
+    INDEX idx_publish_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流发布表';
+
 -- 节点定义表
 CREATE TABLE IF NOT EXISTS node_definition (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '节点定义主键 ID',

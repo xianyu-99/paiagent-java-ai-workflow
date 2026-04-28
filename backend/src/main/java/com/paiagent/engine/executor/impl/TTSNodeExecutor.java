@@ -81,8 +81,6 @@ public class TTSNodeExecutor implements NodeExecutor {
         }
         
         List<byte[]> audioChunks = new ArrayList<>();
-        MultiModalConversation conv = new MultiModalConversation();
-        
         List<CompletableFuture<byte[]>> futures = new ArrayList<>();
         
         for (int i = 0; i < textChunks.size(); i++) {
@@ -116,6 +114,7 @@ public class TTSNodeExecutor implements NodeExecutor {
                             .languageType(languageType)
                             .build();
                     
+                    MultiModalConversation conv = new MultiModalConversation();
                     MultiModalConversationResult result = conv.call(param);
                     String audioUrl = result.getOutput().getAudio().getUrl();
                     

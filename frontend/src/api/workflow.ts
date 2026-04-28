@@ -30,6 +30,48 @@ export interface Workflow {
   updatedAt: string;
 }
 
+export interface WorkflowPublish {
+  id: number;
+  workflowId: number;
+  shareKey: string;
+  title: string;
+  description?: string;
+  enabled: boolean;
+  publicPagePath: string;
+  publicApiPath: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublishedWorkflowInfo {
+  workflowId: number;
+  shareKey: string;
+  title: string;
+  description?: string;
+  nodeSummary?: string;
+  publicApiPath: string;
+}
+
+export interface ExecutionNodeResult {
+  nodeId: string;
+  nodeName?: string;
+  status: string;
+  input?: string;
+  output?: string;
+  duration?: number;
+  error?: string;
+}
+
+export interface ExecutionResponse {
+  executionId?: number;
+  status: string;
+  nodeResults?: ExecutionNodeResult[];
+  outputData?: string;
+  duration?: number;
+  errorMessage?: string;
+  errorLog?: unknown;
+}
+
 export interface ApiResult<T> {
   code: number;
   message: string;
@@ -92,6 +134,29 @@ export const deleteWorkflow = (id: number): Promise<ApiResult<void>> => {
 /**
  * 执行工作流
  */
+export const getWorkflowPublish = (id: number): Promise<ApiResult<WorkflowPublish | null>> => {
+  return api.get(`/api/workflows/${id}/publish`);
+};
+
+export const publishWorkflow = (id: number): Promise<ApiResult<WorkflowPublish>> => {
+  return api.post(`/api/workflows/${id}/publish`);
+};
+
+export const unpublishWorkflow = (id: number): Promise<ApiResult<WorkflowPublish | null>> => {
+  return api.delete(`/api/workflows/${id}/publish`);
+};
+
+export const getPublishedWorkflow = (shareKey: string): Promise<ApiResult<PublishedWorkflowInfo>> => {
+  return api.get(`/api/published-workflows/${shareKey}`);
+};
+
+export const executePublishedWorkflow = (
+  shareKey: string,
+  inputData: string
+): Promise<ApiResult<ExecutionResponse>> => {
+  return api.post(`/api/published-workflows/${shareKey}/execute`, { inputData });
+};
+
 export const executeWorkflow = (id: number, inputData: string): Promise<ApiResult<WorkflowExecutionPayload>> => {
   return api.post(`/api/workflows/${id}/execute`, { inputData });
 };

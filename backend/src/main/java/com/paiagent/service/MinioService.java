@@ -72,6 +72,7 @@ public class MinioService {
         // 用浏览器可访问的 publicUrl 签名，避免 Docker 内部服务名出现在返回 URL 中。
         MinioClient presignClient = MinioClient.builder()
                 .endpoint(minioConfig.getPublicUrl())
+                .region(minioConfig.getRegion())
                 .credentials(minioConfig.getAccessKey(), minioConfig.getSecretKey())
                 .build();
         return presignClient.getPresignedObjectUrl(

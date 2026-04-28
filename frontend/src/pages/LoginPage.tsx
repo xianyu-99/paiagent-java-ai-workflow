@@ -11,6 +11,17 @@ interface AuthFormValues {
   confirmPassword?: string;
 }
 
+const getErrorMessage = (error: unknown, fallback: string) => {
+  const responseData = (error as { response?: { data?: { message?: string } | string } }).response?.data;
+  if (typeof responseData === 'string' && responseData) {
+    return responseData;
+  }
+  if (responseData && typeof responseData === 'object' && responseData.message) {
+    return responseData.message;
+  }
+  return error instanceof Error ? error.message : fallback;
+};
+
 const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [registerMode, setRegisterMode] = useState(false);
@@ -43,8 +54,8 @@ const LoginPage = () => {
       } else {
         message.error(result.message || (registerMode ? '注册失败' : '登录失败'));
       }
-    } catch {
-      message.error(`${registerMode ? '注册' : '登录'}失败，请检查网络连接`);
+    } catch (error) {
+      message.error(getErrorMessage(error, `${registerMode ? '注册' : '登录'}失败，请检查网络连接`));
     } finally {
       setLoading(false);
     }
@@ -60,7 +71,7 @@ const LoginPage = () => {
       <div className="bg-white rounded-lg shadow-xl p-8 w-96">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-800 mb-2">PaiAgent</h1>
-          <p className="text-gray-600">AI Agent 流图执行面板</p>
+          <p className="text-gray-600">AI Agent 流程执行面板</p>
         </div>
 
         <Form form={form} name="login" onFinish={onFinish} size="large">

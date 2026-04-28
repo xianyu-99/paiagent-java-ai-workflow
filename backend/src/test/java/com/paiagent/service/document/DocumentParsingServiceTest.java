@@ -81,6 +81,25 @@ class DocumentParsingServiceTest {
         }
     }
 
+    @Test
+    void parseJsonAsFormattedText() {
+        ParsedDocument document = documentParsingService.parseFile(
+                "faq.json",
+                "application/json",
+                "{\"question\":\"What is RAG?\",\"answer\":\"Retrieval augmented generation\"}".getBytes()
+        );
+
+        assertEquals("json", document.parserType());
+        assertEquals("application/json", document.contentType());
+        assertEquals(1, document.segments().size());
+        assertTrue(document.rawText().contains("Retrieval augmented generation"));
+    }
+
+    @Test
+    void detectLegacyDocContentType() {
+        assertEquals("application/msword", documentParsingService.detectContentType("guide.doc", null));
+    }
+
     private void addPdfPage(PDDocument pdf, String text) throws Exception {
         PDPage page = new PDPage();
         pdf.addPage(page);

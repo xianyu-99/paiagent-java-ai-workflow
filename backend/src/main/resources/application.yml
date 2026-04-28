@@ -42,7 +42,7 @@ mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: false
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: ${MYBATIS_LOG_IMPL:org.apache.ibatis.logging.nologging.NoLoggingImpl}
   global-config:
     db-config:
       id-type: auto
@@ -70,6 +70,7 @@ minio:
   secretKey: ${MINIO_SECRET_KEY:minioadmin}
   bucketName: paiagent
   publicUrl: ${MINIO_PUBLIC_URL:http://localhost:9000}
+  region: ${MINIO_REGION:us-east-1}
 
 # PaiAgent 配置
 paiagent:
