@@ -9,6 +9,10 @@ spring:
       - optional:file:../.env[.properties]
       - optional:file:.env[.properties]
       - optional:file:backend/.env[.properties]
+  servlet:
+    multipart:
+      max-file-size: ${APP_UPLOAD_MAX_FILE_SIZE:50MB}
+      max-request-size: ${APP_UPLOAD_MAX_REQUEST_SIZE:60MB}
   devtools:
     restart:
       enabled: true

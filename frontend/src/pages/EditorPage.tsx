@@ -99,6 +99,9 @@ interface WorkflowCanvasData {
   edges?: Edge[];
 }
 
+const MAX_KNOWLEDGE_UPLOAD_SIZE_MB = 50;
+const MAX_KNOWLEDGE_UPLOAD_SIZE = MAX_KNOWLEDGE_UPLOAD_SIZE_MB * 1024 * 1024;
+
 /**
  * 工作流编辑器页面
  */
@@ -1055,6 +1058,10 @@ const EditorPage = () => {
     }
     if (!knowledgeLocalFile) {
       message.warning('请选择本地 txt / markdown 文件');
+      return;
+    }
+    if (knowledgeLocalFile.size > MAX_KNOWLEDGE_UPLOAD_SIZE) {
+      message.error(`文件不能超过 ${MAX_KNOWLEDGE_UPLOAD_SIZE_MB}MB`);
       return;
     }
 
@@ -2120,6 +2127,10 @@ const EditorPage = () => {
                                   accept=".txt,.md,.markdown,.json,.pdf,.doc,.docx,text/plain,text/markdown,application/json,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                   maxCount={1}
                                   beforeUpload={(file) => {
+                                    if (file.size > MAX_KNOWLEDGE_UPLOAD_SIZE) {
+                                      message.error(`文件不能超过 ${MAX_KNOWLEDGE_UPLOAD_SIZE_MB}MB`);
+                                      return Upload.LIST_IGNORE;
+                                    }
                                     setKnowledgeLocalFile(file);
                                     return false;
                                   }}

@@ -19,6 +19,9 @@ import {
   startKnowledgeTextImport,
 } from '../api/knowledge';
 
+const MAX_KNOWLEDGE_UPLOAD_SIZE_MB = 50;
+const MAX_KNOWLEDGE_UPLOAD_SIZE = MAX_KNOWLEDGE_UPLOAD_SIZE_MB * 1024 * 1024;
+
 const KnowledgeBasePage = () => {
   const navigate = useNavigate();
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
@@ -194,6 +197,10 @@ const KnowledgeBasePage = () => {
       message.warning('请选择本地文件');
       return;
     }
+    if (localFile.size > MAX_KNOWLEDGE_UPLOAD_SIZE) {
+      message.error(`文件不能超过 ${MAX_KNOWLEDGE_UPLOAD_SIZE_MB}MB`);
+      return;
+    }
     setUploading(true);
     try {
       const response = await startKnowledgeFileImport(selectedKnowledgeBaseId, localFile);
@@ -330,6 +337,10 @@ const KnowledgeBasePage = () => {
                         accept=".txt,.md,.markdown,.json,.pdf,.doc,.docx,text/plain,text/markdown,application/json,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         maxCount={1}
                         beforeUpload={(file) => {
+                          if (file.size > MAX_KNOWLEDGE_UPLOAD_SIZE) {
+                            message.error(`文件不能超过 ${MAX_KNOWLEDGE_UPLOAD_SIZE_MB}MB`);
+                            return Upload.LIST_IGNORE;
+                          }
                           setLocalFile(file);
                           return false;
                         }}
