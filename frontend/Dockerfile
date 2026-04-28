@@ -1,8 +1,10 @@
+# syntax=docker/dockerfile:1.7
+
 FROM node:20-bookworm-slim AS build
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --no-audit --no-fund --foreground-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --foreground-scripts
 COPY . .
 ARG VITE_API_BASE_URL=/api
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}

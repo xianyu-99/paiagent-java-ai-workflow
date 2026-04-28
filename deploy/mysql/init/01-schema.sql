@@ -193,30 +193,3 @@ ON DUPLICATE KEY UPDATE
     config_schema = VALUES(config_schema),
     deleted = 0,
     updated_at = CURRENT_TIMESTAMP;
-
-INSERT INTO workflow (name, description, flow_data, engine_type, owner_id)
-SELECT
-    '示例工作流',
-    '输入节点连接输出节点，用于验证 Docker 一键启动后的加载功能。',
-    '{
-      "nodes": [
-        {
-          "id": "input-1",
-          "type": "input",
-          "position": {"x": 250, "y": 100},
-          "data": {"type": "input", "label": "输入节点"}
-        },
-        {
-          "id": "output-1",
-          "type": "output",
-          "position": {"x": 250, "y": 320},
-          "data": {"type": "output", "label": "输出节点", "outputParams": [], "responseContent": "{{input}}"}
-        }
-      ],
-      "edges": [
-        {"id": "e-input-output", "source": "input-1", "target": "output-1"}
-      ]
-    }',
-    'dag',
-    1
-WHERE NOT EXISTS (SELECT 1 FROM workflow WHERE deleted = 0);

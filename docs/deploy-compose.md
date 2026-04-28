@@ -63,6 +63,44 @@ Qdrant gRPC        6334 -> 6334
 
 不要随手执行 `down -v`。`-v` 会删除 MySQL、Redis、MinIO、Qdrant 的数据卷。
 
+### 从本机旧环境导入真实数据
+
+如果你之前没有用 Docker 跑后端，而是用本机已有的 `mysql:3306` 保存过工作流、LLM 配置、知识库等数据，一键演示环境不会自动带上这些数据。启动完整 Docker 后执行：
+
+```powershell
+.\scripts\docker-import-local-data.ps1
+```
+
+默认导入方向是：
+
+```text
+源库：mysql / paiagent / 3306
+目标库：paiagent-mysql / paiagent / 3307
+```
+
+脚本会先备份目标 Docker 数据库到 `backups/`，再导入这些业务表：
+
+```text
+app_user
+workflow
+execution_record
+llm_global_config
+knowledge_base
+knowledge_document
+knowledge_chunk
+knowledge_import_task
+```
+
+如果容器名、数据库名或密码不同，可以用环境变量覆盖，例如：
+
+```powershell
+$env:PAIAGENT_SOURCE_MYSQL_CONTAINER="mysql"
+$env:PAIAGENT_TARGET_MYSQL_CONTAINER="paiagent-mysql"
+$env:PAIAGENT_SOURCE_MYSQL_PASSWORD="123456"
+$env:PAIAGENT_TARGET_MYSQL_PASSWORD="123456"
+.\scripts\docker-import-local-data.ps1
+```
+
 ## 只启动前后端
 
 适合你已经有独立基础设施时使用。它只启动：
