@@ -85,6 +85,11 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
         if (!admin && (workflow.getOwnerId() == null || !workflow.getOwnerId().equals(userId))) {
             throw new ForbiddenException("无权访问该工作流");
         }
+        return workflow;
+    }
+
+    public Workflow getWorkflowForExecution(Long id, Long userId, boolean admin) {
+        Workflow workflow = getAccessibleWorkflow(id, userId, admin);
         workflow.setFlowData(apiKeyCryptoService.decryptApiKeysInJson(workflow.getFlowData()));
         return workflow;
     }

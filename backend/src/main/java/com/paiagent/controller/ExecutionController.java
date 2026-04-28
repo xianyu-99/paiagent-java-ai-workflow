@@ -71,7 +71,7 @@ public class ExecutionController {
         try {
             Long userId = AuthContext.getUserId(servletRequest);
             boolean admin = AuthContext.isAdmin(servletRequest);
-            Workflow workflow = workflowService.getAccessibleWorkflow(
+            Workflow workflow = workflowService.getWorkflowForExecution(
                     id,
                     userId,
                     admin
@@ -152,7 +152,7 @@ public class ExecutionController {
             workflowExecutionTaskExecutor.execute(() -> {
                 WorkflowExecutionContextHolder.set(userId, admin);
                 try {
-                    Workflow workflow = workflowService.getAccessibleWorkflow(id, userId, admin);
+                    Workflow workflow = workflowService.getWorkflowForExecution(id, userId, admin);
                     WorkflowExecutor executor = engineSelector.selectEngine(workflow);
                     executor.executeWithCallback(workflow, inputData, eventCallback);
                     emitter.complete();

@@ -152,10 +152,11 @@ Qdrant collection 会按 Embedding 类型和维度自动隔离，例如 `paiagen
 
 ### Docker Compose 一键部署
 
-- 提供 MySQL、Redis、MinIO、Qdrant、后端、前端的一键编排
-- 额外提供外部依赖版 Compose，可只启动 PaiAgent 前后端并连接已有基础设施
+- `scripts/docker-up-full.ps1` 一键启动演示环境：先启动独立 Qdrant，再启动 PaiAgent 前端、后端、MySQL、Redis、MinIO
+- `scripts/docker-up-app.ps1` 只启动 PaiAgent 前后端，连接已有 MySQL、Redis、MinIO、Qdrant
+- `scripts/docker-up-qdrant.ps1` 单独启动 Qdrant，容器名为 `qdrant`，不再挂在 `paiagent-main` 应用组下
 - 前端使用 Nginx 托管静态资源，并反向代理 `/api`
-- 支持本机演示和局域网访问
+- 支持本机演示和局域网访问，详细说明见 [docs/deploy-compose.md](docs/deploy-compose.md)
 
 ## 技术栈
 

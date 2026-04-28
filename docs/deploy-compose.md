@@ -1,24 +1,38 @@
 # Docker Compose 部署
 
-项目提供两种 Compose 启动方式：
+项目现在拆成三种启动方式，避免把 Qdrant 混在 PaiAgent 应用组里：
 
-- 完整演示版：`docker-compose.yml`，启动前端、后端、MySQL、Redis、MinIO、Qdrant，适合新电脑一键运行。
-- 外部依赖版：`docker-compose.app.yml`，只启动前端和后端，连接你已有的 MySQL、Redis、MinIO、Qdrant。
+- `scripts/docker-up-full.ps1`：一键启动演示环境。会启动独立 Qdrant，再启动 PaiAgent 前端、后端、MySQL、Redis、MinIO。
+- `scripts/docker-up-app.ps1`：只启动 PaiAgent 前端和后端，连接你已有的 MySQL、Redis、MinIO、Qdrant。
+- `scripts/docker-up-qdrant.ps1`：只启动独立 Qdrant。
 
-## 完整演示版
+## 一键演示环境
 
-适合没有本地基础服务的机器：
+适合新电脑或想完整复现项目时使用：
 
 ```powershell
-docker compose up -d --build
+.\scripts\docker-up-full.ps1
 ```
 
-访问地址：
+这个脚本会先执行：
 
-- 前端：http://localhost:5173
+```powershell
+docker compose -f docker-compose.qdrant.yml up -d
+```
+
+再执行：
+
+```powershell
+docker compose up -d --build --remove-orphans
+```
+
+默认访问地址：
+
+- 前端：http://localhost:5174
+- 编辑器：http://localhost:5174/editor
 - 后端 Swagger：http://localhost:8085/swagger-ui.html
-- MinIO Console：http://localhost:9001
-- Qdrant：http://localhost:6333
+- MinIO Console：http://localhost:9003
+- Qdrant：http://localhost:6333/dashboard
 
 默认管理员：
 
@@ -26,79 +40,43 @@ docker compose up -d --build
 admin / admin123
 ```
 
-完整演示版会创建这些 Docker named volume：
+默认端口：
 
 ```text
-paiagent_mysql_data
-paiagent_redis_data
-paiagent_minio_data
-paiagent_qdrant_data
+PaiAgent Frontend  5174 -> 80
+PaiAgent Backend   8085 -> 8084
+PaiAgent MySQL     3307 -> 3306
+PaiAgent Redis     6380 -> 6379
+PaiAgent MinIO     9002 -> 9000
+MinIO Console      9003 -> 9001
+Qdrant             6333 -> 6333
+Qdrant gRPC        6334 -> 6334
 ```
 
-停止服务但保留数据：
+这样不会占用你已有的 `mysql:3306`、`redis:6379`、`minio:9000/9001`。
+
+停止完整演示环境但保留数据：
 
 ```powershell
-docker compose down
+.\scripts\docker-down-full.ps1
 ```
 
-删除容器和数据卷：
+不要随手执行 `down -v`。`-v` 会删除 MySQL、Redis、MinIO、Qdrant 的数据卷。
 
-```powershell
-docker compose down -v
-```
+## 只启动前后端
 
-`down -v` 会删除 MySQL、Redis、MinIO、Qdrant 的演示数据，执行前确认不需要保留。
-
-## 外部依赖版
-
-适合已经有公共基础服务的开发机或部署环境。它只启动：
+适合你已经有独立基础设施时使用。它只启动：
 
 - `paiagent-backend`
 - `paiagent-frontend`
 
-它不会启动项目专属 MySQL、Redis、MinIO、Qdrant。
-
-### 1. 准备外部服务
-
-确保这些服务已经可从宿主机访问：
-
-```text
-MySQL  127.0.0.1:3306
-Redis  127.0.0.1:6379
-MinIO  http://127.0.0.1:9000
-Qdrant http://127.0.0.1:6333
-```
-
-如果只有 Qdrant 没有单独服务，可以启动独立 Qdrant：
-
-```powershell
-docker compose -f docker-compose.qdrant.yml up -d
-```
-
-这个 Qdrant 不属于 PaiAgent 应用 Compose，容器名是 `qdrant`，数据卷是 `ai-infra_qdrant_data`。
-
-如果你之前已经用完整演示版导入过 Qdrant 数据，可以复用旧数据卷启动独立 Qdrant：
-
-```powershell
-$env:QDRANT_VOLUME_NAME="paiagent-main_paiagent_qdrant_data"
-docker compose -f docker-compose.qdrant.yml up -d
-```
-
-### 2. 准备外部环境变量
-
-复制模板：
+准备配置：
 
 ```powershell
 Copy-Item .env.external.example .env.external
 ```
 
-按你的本机服务修改 `.env.external`。在 Docker Desktop 下，容器访问宿主机服务要用：
-
-```text
-host.docker.internal
-```
-
-例如：
+按你的本机服务修改 `.env.external`：
 
 ```env
 EXTERNAL_MYSQL_HOST=host.docker.internal
@@ -110,71 +88,56 @@ EXTERNAL_MINIO_PUBLIC_URL=http://localhost:9000
 EXTERNAL_QDRANT_URL=http://host.docker.internal:6333
 ```
 
-如果外部 MySQL 还没有 `paiagent` 数据库，先创建并导入 schema：
+启动：
 
 ```powershell
-mysql -h 127.0.0.1 -P 3306 -u root -p -e "CREATE DATABASE IF NOT EXISTS paiagent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-mysql -h 127.0.0.1 -P 3306 -u root -p paiagent < backend/src/main/resources/schema.sql
+.\scripts\docker-up-app.ps1
 ```
 
-### 3. 启动 PaiAgent 应用
+停止：
 
 ```powershell
-docker compose --env-file .env.external -f docker-compose.app.yml up -d --build
+.\scripts\docker-down-app.ps1
 ```
 
-访问地址：
+## 单独启动 Qdrant
 
-- 前端：http://localhost:5174
-- 后端 Swagger：http://localhost:8085/swagger-ui.html
-
-验证 Qdrant 是外部服务：
+如果你已经有 MySQL、Redis、MinIO，只缺 Qdrant：
 
 ```powershell
-docker compose --env-file .env.external -f docker-compose.app.yml ps
-docker ps --filter "name=qdrant"
+.\scripts\docker-up-qdrant.ps1
 ```
 
-### 4. 停止外部依赖版
+Qdrant 容器名是 `qdrant`，不再放在 `paiagent-main` 组下。
 
-只停止 PaiAgent 前后端：
+如果之前用旧的一键 Compose 生成过 `paiagent-main_paiagent_qdrant_data`，脚本会优先复用这个旧数据卷，避免已有向量数据丢失。
 
-```powershell
-docker compose --env-file .env.external -f docker-compose.app.yml down
-```
+## 局域网访问
 
-这不会停止你的外部 MySQL、Redis、MinIO、Qdrant。
-
-如果单独启动了 `docker-compose.qdrant.yml`，停止 Qdrant：
-
-```powershell
-docker compose -f docker-compose.qdrant.yml down
-```
-
-删除独立 Qdrant 数据：
-
-```powershell
-docker compose -f docker-compose.qdrant.yml down -v
-```
-
-## 局域网演示
-
-完整演示版和外部依赖版都需要保证 `MINIO_PUBLIC_URL` 是浏览器能访问的地址。
-
-查询本机局域网 IP：
+先查本机局域网 IP：
 
 ```powershell
 ipconfig
 ```
 
-完整演示版修改 `.env`：
+假设 IP 是 `192.168.1.20`，局域网访问地址是：
 
-```text
-MINIO_PUBLIC_URL=http://你的局域网IP:9000
+- 前端：http://192.168.1.20:5174
+- 编辑器：http://192.168.1.20:5174/editor
+- 后端 Swagger：http://192.168.1.20:8085/swagger-ui.html
+- MinIO Console：http://192.168.1.20:9003
+- Qdrant：http://192.168.1.20:6333/dashboard
+
+音频、文件这类 MinIO URL 需要让浏览器能访问。完整演示环境修改 `.env`：
+
+```env
+MINIO_PUBLIC_URL=http://192.168.1.20:9002
 ```
 
-外部依赖版修改 `.env.external`：
+只启动前后端模式修改 `.env.external`：
 
-```text
-EXTERNAL_MINIO_PUBLIC_URL=http://你的局域网IP:9000
+```env
+EXTERNAL_MINIO_PUBLIC_URL=http://192.168.1.20:9000
 ```
+
+修改后重启对应容器。

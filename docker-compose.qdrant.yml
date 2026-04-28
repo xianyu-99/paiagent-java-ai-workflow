@@ -1,4 +1,4 @@
-name: ai-infra
+name: qdrant
 
 services:
   qdrant:
@@ -12,4 +12,5 @@ services:
 
 volumes:
   qdrant_data:
-    name: ${QDRANT_VOLUME_NAME:-ai-infra_qdrant_data}
+    external: true
+    name: ${QDRANT_VOLUME_NAME:-qdrant_data}
