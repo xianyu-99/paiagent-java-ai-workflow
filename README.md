@@ -1,6 +1,6 @@
 # PaiAgent Java AI Workflow
 
-基于 Java 21、Spring Boot、ReactFlow 的 AI 工作流可视化编排平台。项目支持通过拖拽方式组合 `input -> llm -> tts -> output` 等节点，将大模型调用、语音合成、文件存储和执行调试封装成可复用的工作流能力。
+基于 Java 21、Spring Boot、ReactFlow 的 AI 工作流可视化编排平台。项目支持通过拖拽方式组合 `input -> rag -> llm -> tts -> output` 等节点，将大模型调用、知识库检索、语音合成、文件存储、执行调试和工作流发布封装成可复用的 AI 应用能力。
 
 本仓库基于 [itwanger/PaiAgent](https://github.com/itwanger/PaiAgent) 进行本地复现与二次增强，保留原项目的可视化工作流核心思路，并补充了用户体系、敏感配置加密、TTS + MinIO 完整链路、Docker Compose 部署等工程化能力。
 
@@ -11,7 +11,7 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 典型链路：
 
 ```text
-用户输入 -> LLM 节点生成文本 -> TTS 节点合成语音 -> MinIO 保存音频 -> 输出结果
+用户输入 -> RAG 检索知识库 -> LLM 生成回答 -> TTS 合成语音 -> MinIO 保存音频 -> 发布页面/API 调用
 ```
 
 适合用于：
@@ -19,7 +19,7 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 - 大模型应用开发练习与面试展示
 - Java 后端 AI Agent / Workflow 项目复现
 - LLM、TTS、对象存储、SSE 调试的工程化整合
-- 已支持 DAG / LangGraph 条件分支、RAG 知识库问答，后续可扩展分类器、Agent 状态流等能力
+- 已支持 DAG / LangGraph 条件分支、RAG 知识库问答、工作流发布页面与 API 调用
 
 ## 核心功能
 
@@ -76,14 +76,32 @@ TTS 节点已经实现完整链路：
 ### RAG 知识库节点
 
 - 支持创建用户级知识库
-- 支持粘贴导入 txt / markdown 文本内容，也支持本地 txt / markdown 文件上传
+- 支持粘贴导入文本内容，也支持本地 `txt / md / json / pdf / doc / docx` 文件上传
 - 后端自动按长度和标点进行文本切片
 - 支持可插拔 Embedding Provider：默认本地 Hash Embedding，可切换 DashScope `text-embedding-v4`
 - 支持可插拔 VectorStore：默认 MySQL JSON 向量兜底，Docker Compose 演示环境可启用 Qdrant
 - 支持知识库向量索引重建，避免切换 Embedding 模型后新旧向量混用
-- 使用余弦相似度召回相关知识片段
+- 使用向量相似度、关键词匹配和 rerank 分数召回相关知识片段
 - RAG 节点先召回相关知识片段，再将 `context + question` 拼入 LLM 提示词生成回答
+- RAG 输出包含结构化 `citations`，发布页面会展示来源文件、页码、分数和片段预览
 - 节点执行过程通过 `NODE_PROGRESS` 推送“检索中 / 检索完成”等状态
+
+### 工作流发布与 API 调用
+
+- 支持把已保存的工作流发布为公开页面，页面地址形如 `/p/{shareKey}`
+- 发布后同时生成正式 API 地址，形如 `/api/published-workflows/{shareKey}/execute-api`
+- 正式 API 需要在请求头传入 `X-PaiAgent-Api-Key`，避免公开链接被直接当作无限制 API 使用
+- 编辑器发布弹窗会展示公开页面、API 地址、API 访问密钥和 `curl` 示例
+- 公开页面适合人工演示和轻量使用，正式 API 适合外部系统集成
+
+API 调用示例：
+
+```bash
+curl -X POST "http://localhost:5174/api/published-workflows/{shareKey}/execute-api" \
+  -H "Content-Type: application/json" \
+  -H "X-PaiAgent-Api-Key: {apiAccessKey}" \
+  -d "{\"inputData\":\"请根据知识库介绍这个项目\"}"
+```
 
 ### RAG Embedding 配置
 
@@ -357,6 +375,16 @@ http://你的局域网IP:5173
 
 更多说明见 [Docker Compose 部署文档](docs/deploy-compose.md)。
 
+## 推荐演示流程
+
+1. 登录系统，创建一个知识库。
+2. 上传一份 `pdf / docx / txt` 文档，等待异步导入完成。
+3. 在编辑器创建工作流：`Input -> RAG -> LLM -> TTS -> Output`。
+4. RAG 节点选择刚才的知识库，问题来源引用 `Input.user_input`。
+5. LLM 节点选择全局模型配置，TTS 节点配置语音合成参数。
+6. 点击调试，观察节点执行日志、RAG 命中片段、TTS 合成耗时和最终音频输出。
+7. 点击发布，复制公开页面进行演示，复制 API 地址和访问密钥给外部程序调用。
+
 ## 已完成的增强
 
 - 完成本地后端、前端、MySQL、Redis、MinIO 联调
@@ -371,6 +399,8 @@ http://你的局域网IP:5173
 - 增加 DAG if/else 条件分支节点：支持 true / false 出口、上游参数引用和动态分支执行
 - 跑通 LangGraph4j conditional edge 条件分支和基础循环执行，并补充自动化测试
 - 增加 RAG 知识库节点：知识库创建、文本导入、自动切片、可插拔 Embedding、Qdrant 向量索引、相似度检索、向量重建和 LLM 回答
+- 增加 RAG 文件解析、异步导入和引用来源展示：支持 `txt / md / json / pdf / doc / docx`，输出来源文件、页码、分数和片段预览
+- 增加工作流发布能力：支持公开页面、受 API Key 保护的正式调用接口和调用示例
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
 
 ## 当前边界
@@ -379,7 +409,8 @@ http://你的局域网IP:5173
 - LangGraph4j 已支持条件分支和基础循环，但复杂 Agent 状态流、人工中断、检查点恢复仍属于后续增强方向
 - RAG 默认使用本地 Hash Embedding，适合演示和复现；已支持切换 DashScope Embedding，生产环境还可继续接入 BGE / OpenAI Embedding
 - RAG 已支持 MySQL JSON 向量兜底和 Qdrant 专用向量索引；超大规模知识库可继续升级 Milvus
-- RAG 当前支持文本内容导入，PDF / Word 解析、多知识库权限审计可继续扩展
+- RAG 已支持常见文档格式解析，但检索质量仍依赖 Embedding Provider、chunk 参数和知识库内容质量
+- 发布 API 已有访问密钥保护，生产环境还应继续补限流、调用审计和密钥轮换
 - 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 
 ## 简历描述参考
@@ -388,11 +419,11 @@ http://你的局域网IP:5173
 
 ## 后续规划
 
-- 增加分类器节点和更复杂的多分支路由节点
-- 增强 LangGraph4j Agent 状态流、检查点恢复和人工中断
-- 增强 RAG：接入 PDF / Word 解析、Milvus 超大规模向量库和多知识库管理
-- 增加执行中断、工作流版本发布和执行快照
-- 增加更多模型供应商和统一模型健康检查
+项目当前按“可视化 AI 工作流编排 + RAG 知识库 + 工作流发布调用平台”收口，不再继续横向扩展大量新节点。后续只保留三类增强：
+
+- RAG 检索质量：优化 chunk overlap、rerank、引用展示和多文档召回效果
+- 发布调用安全：增加调用次数统计、限流、API Key 轮换和调用审计
+- 演示部署闭环：完善示例工作流、截图、环境变量说明和局域网/外部部署说明
 
 ## 项目来源
 

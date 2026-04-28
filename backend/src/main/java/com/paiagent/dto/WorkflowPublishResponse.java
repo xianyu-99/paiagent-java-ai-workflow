@@ -13,6 +13,8 @@ public class WorkflowPublishResponse {
 
     private String shareKey;
 
+    private String apiAccessKey;
+
     private String title;
 
     private String description;

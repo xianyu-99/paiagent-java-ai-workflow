@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Workflow Publish")
@@ -101,13 +101,43 @@ public class WorkflowPublishController {
         }
     }
 
+    @Operation(summary = "Execute published workflow API")
+    @PostMapping("/api/published-workflows/{shareKey}/execute-api")
+    public Result<ExecutionResponse> executePublishedWorkflowApi(
+            @PathVariable String shareKey,
+            @RequestHeader(value = "X-PaiAgent-Api-Key", required = false) String apiAccessKey,
+            @Valid @RequestBody ExecutionRequest request
+    ) {
+        try {
+            return Result.success(workflowPublishService.executePublishedWorkflowApi(
+                    shareKey,
+                    request.getInputData(),
+                    apiAccessKey
+            ));
+        } catch (ForbiddenException e) {
+            return Result.forbidden(e.getMessage());
+        } catch (Exception e) {
+            return Result.error("工作流执行失败: " + e.getMessage());
+        }
+    }
+
     @Operation(summary = "Published workflow API usage hint")
     @GetMapping("/api/published-workflows/{shareKey}/execute")
     public Result<String> getPublishedWorkflowExecuteUsage(@PathVariable String shareKey) {
         return Result.error(
                 405,
-                "这是 API POST 调用地址，不能直接在浏览器地址栏打开。请访问 /p/" + shareKey
-                        + " 使用页面，或用 POST JSON 调用: {\"inputData\":\"你的输入\"}"
+                "这是公开页面内部调用地址，不能直接在浏览器地址栏打开。请访问 /p/" + shareKey
+                        + " 使用页面；正式 API 请 POST /api/published-workflows/" + shareKey
+                        + "/execute-api，并在请求头传入 X-PaiAgent-Api-Key"
+        );
+    }
+
+    @Operation(summary = "Published workflow protected API usage hint")
+    @GetMapping("/api/published-workflows/{shareKey}/execute-api")
+    public Result<String> getPublishedWorkflowApiUsage(@PathVariable String shareKey) {
+        return Result.error(
+                405,
+                "这是 API POST 调用地址，不能直接在浏览器地址栏打开。请使用 POST JSON: {\"inputData\":\"你的输入\"}，并在请求头传入 X-PaiAgent-Api-Key"
         );
     }
 }

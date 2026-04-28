@@ -18,6 +18,15 @@ type AudioOutput = {
   fileName?: string;
 };
 
+type Citation = {
+  ref?: string;
+  sourceName?: string;
+  sectionTitle?: string;
+  pageNumber?: number;
+  score?: number;
+  preview?: string;
+};
+
 const parseMaybeJson = (value: unknown): unknown => {
   if (typeof value !== 'string') {
     return value;
@@ -91,6 +100,57 @@ const formatOutput = (value: unknown) => {
   return JSON.stringify(value, null, 2);
 };
 
+const isCitation = (value: unknown): value is Citation => {
+  const record = asRecord(value);
+  return !!record && (
+    typeof record.ref === 'string' ||
+    typeof record.sourceName === 'string' ||
+    typeof record.preview === 'string'
+  );
+};
+
+const extractCitations = (result: ExecutionResponse | null): Citation[] => {
+  if (!result) {
+    return [];
+  }
+
+  const citations: Citation[] = [];
+  const seen = new Set<string>();
+  const candidates: unknown[] = [parseMaybeJson(result.outputData)];
+  for (const node of result.nodeResults || []) {
+    candidates.push(parseMaybeJson(node.output));
+  }
+
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    const rawCitations = Array.isArray(record?.citations)
+      ? record.citations
+      : Array.isArray(record?.sources)
+        ? record.sources
+        : [];
+
+    for (const rawCitation of rawCitations) {
+      if (!isCitation(rawCitation)) {
+        continue;
+      }
+      const key = [
+        rawCitation.ref || '',
+        rawCitation.sourceName || '',
+        rawCitation.pageNumber || '',
+        rawCitation.sectionTitle || '',
+        rawCitation.preview || ''
+      ].join('|');
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      citations.push(rawCitation);
+    }
+  }
+
+  return citations;
+};
+
 const PublishedWorkflowPage = () => {
   const { shareKey } = useParams<{ shareKey: string }>();
   const [workflow, setWorkflow] = useState<PublishedWorkflowInfo | null>(null);
@@ -127,6 +187,7 @@ const PublishedWorkflowPage = () => {
 
   const audioOutput = useMemo(() => extractAudioOutput(result), [result]);
   const displayOutput = useMemo(() => formatOutput(pickDisplayOutput(result)), [result]);
+  const citations = useMemo(() => extractCitations(result), [result]);
 
   const handleRun = async () => {
     if (!shareKey) {
@@ -212,9 +273,32 @@ const PublishedWorkflowPage = () => {
           )}
 
           {!running && result && (
-            <pre className="whitespace-pre-wrap break-words text-sm text-gray-800 bg-gray-50 border rounded p-4 max-h-[520px] overflow-auto">
-              {displayOutput}
-            </pre>
+            <>
+              <pre className="whitespace-pre-wrap break-words text-sm text-gray-800 bg-gray-50 border rounded p-4 max-h-[520px] overflow-auto">
+                {displayOutput}
+              </pre>
+              {citations.length > 0 && (
+                <div className="mt-4 border rounded p-4 bg-white">
+                  <div className="font-medium text-gray-900 mb-3">引用来源</div>
+                  <div className="space-y-3">
+                    {citations.map((citation, index) => (
+                      <div key={`${citation.ref || index}-${citation.sourceName || 'source'}`} className="text-sm text-gray-700">
+                        <div className="font-medium">
+                          {citation.ref || `来源${index + 1}`}
+                          {citation.sourceName ? ` · ${citation.sourceName}` : ''}
+                          {citation.pageNumber ? ` · 第 ${citation.pageNumber} 页` : ''}
+                          {citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}
+                          {typeof citation.score === 'number' ? ` · score ${citation.score.toFixed(3)}` : ''}
+                        </div>
+                        {citation.preview && (
+                          <div className="text-gray-500 mt-1">{citation.preview}</div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {!running && !result && !error && (

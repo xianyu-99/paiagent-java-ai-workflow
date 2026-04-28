@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS workflow_publish (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     workflow_id BIGINT NOT NULL,
     share_key VARCHAR(64) NOT NULL,
+    api_access_key VARCHAR(512) NULL,
     title VARCHAR(255) NOT NULL,
     description TEXT,
     enabled TINYINT NOT NULL DEFAULT 1,

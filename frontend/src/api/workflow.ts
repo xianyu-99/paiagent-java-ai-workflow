@@ -34,6 +34,7 @@ export interface WorkflowPublish {
   id: number;
   workflowId: number;
   shareKey: string;
+  apiAccessKey?: string;
   title: string;
   description?: string;
   enabled: boolean;

@@ -7,7 +7,9 @@ import com.paiagent.service.KnowledgeBaseService;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -29,7 +31,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             【用户问题】
             {{question}}
 
-            请用中文给出清晰、简洁的回答。
+            请用中文给出清晰、简洁的回答。涉及知识库依据时，请在句末标注对应来源编号，例如 [来源1]。
             """;
 
     private final KnowledgeBaseService knowledgeBaseService;
@@ -107,6 +109,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         output.put("question", question);
         output.put("context", context);
         output.put("retrievedChunks", chunks);
+        output.put("citations", buildCitations(chunks));
         output.put("retrievedCount", chunks.size());
         return output;
     }
@@ -193,15 +196,47 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         if (chunks == null || chunks.isEmpty()) {
             return "未检索到相关知识片段。";
         }
-        return chunks.stream()
-                .map(chunk -> String.format("[%s, score=%.4f, vector=%.4f, keyword=%.4f, matched=%s]\n%s",
+        return java.util.stream.IntStream.range(0, chunks.size())
+                .mapToObj(index -> {
+                    RetrievedChunk chunk = chunks.get(index);
+                    return String.format("[来源%d: %s, score=%.4f, vector=%.4f, keyword=%.4f, matched=%s]\n%s",
+                        index + 1,
                         buildCitation(chunk),
                         chunk.getScore(),
                         chunk.getVectorScore(),
                         chunk.getKeywordScore(),
                         chunk.getMatchedTerms(),
-                        StringUtils.hasText(chunk.getContextContent()) ? chunk.getContextContent() : chunk.getContent()))
+                        StringUtils.hasText(chunk.getContextContent()) ? chunk.getContextContent() : chunk.getContent());
+                })
                 .collect(Collectors.joining("\n\n---\n\n"));
+    }
+
+    private List<Map<String, Object>> buildCitations(List<RetrievedChunk> chunks) {
+        List<Map<String, Object>> citations = new ArrayList<>();
+        if (chunks == null) {
+            return citations;
+        }
+
+        for (int i = 0; i < chunks.size(); i++) {
+            RetrievedChunk chunk = chunks.get(i);
+            Map<String, Object> citation = new LinkedHashMap<>();
+            citation.put("ref", "来源" + (i + 1));
+            citation.put("chunkId", chunk.getChunkId());
+            citation.put("documentId", chunk.getDocumentId());
+            citation.put("chunkIndex", chunk.getChunkIndex());
+            citation.put("sourceName", chunk.getSourceName());
+            citation.put("sectionTitle", chunk.getSectionTitle());
+            citation.put("pageNumber", chunk.getPageNumber());
+            citation.put("score", chunk.getScore());
+            citation.put("vectorScore", chunk.getVectorScore());
+            citation.put("keywordScore", chunk.getKeywordScore());
+            citation.put("matchedTerms", chunk.getMatchedTerms());
+            citation.put("preview", previewText(StringUtils.hasText(chunk.getContextContent())
+                    ? chunk.getContextContent()
+                    : chunk.getContent()));
+            citations.add(citation);
+        }
+        return citations;
     }
 
     private String buildCitation(RetrievedChunk chunk) {
@@ -216,6 +251,18 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             citation.append(", section=").append(chunk.getSectionTitle());
         }
         return citation.toString();
+    }
+
+    private String previewText(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        String normalized = text.replaceAll("\\s+", " ").trim();
+        int maxLength = 280;
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength) + "...";
     }
 
     private Long toLong(Object value) {

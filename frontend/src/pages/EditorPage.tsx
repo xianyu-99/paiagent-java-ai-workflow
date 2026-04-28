@@ -2330,9 +2330,25 @@ const EditorPage = () => {
                   </Button>
                 }
               />
+              <div className="text-sm text-gray-500 mt-3 mb-2">API 访问密钥</div>
+              <Input.Password
+                readOnly
+                value={publishInfo.apiAccessKey || ''}
+                addonAfter={
+                  <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => copyText(publishInfo.apiAccessKey || '')}>
+                    复制
+                  </Button>
+                }
+              />
               <div className="text-xs text-gray-500 mt-2">
-                这是给程序调用的接口，浏览器地址栏不能直接打开。POST JSON: {`{ "inputData": "你的输入" }`}
+                这是给程序调用的接口，浏览器地址栏不能直接打开。请求头需带 X-PaiAgent-Api-Key，POST JSON: {`{ "inputData": "你的输入" }`}
               </div>
+              <pre className="mt-2 rounded border bg-gray-50 p-3 text-xs overflow-auto">
+{`curl -X POST "${toAbsoluteUrl(publishInfo.publicApiPath)}" \\
+  -H "Content-Type: application/json" \\
+  -H "X-PaiAgent-Api-Key: ${publishInfo.apiAccessKey || '<API_KEY>'}" \\
+  -d "{\\"inputData\\":\\"你的输入\\"}"`}
+              </pre>
             </div>
             <Button type="primary" onClick={() => window.open(toAbsoluteUrl(publishInfo.publicPagePath), '_blank')}>
               打开公开页面

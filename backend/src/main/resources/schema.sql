@@ -39,7 +39,8 @@ CREATE TABLE IF NOT EXISTS workflow (
 CREATE TABLE IF NOT EXISTS workflow_publish (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '发布记录主键 ID',
     workflow_id BIGINT NOT NULL COMMENT '工作流 ID',
-    share_key VARCHAR(64) NOT NULL COMMENT '公开访问密钥',
+    share_key VARCHAR(64) NOT NULL COMMENT '公开页面标识',
+    api_access_key VARCHAR(512) NULL COMMENT 'API 调用访问密钥',
     title VARCHAR(255) NOT NULL COMMENT '公开标题',
     description TEXT COMMENT '公开描述',
     enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',

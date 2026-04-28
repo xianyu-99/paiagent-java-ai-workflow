@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,9 +37,14 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
 
     private final EngineSelector engineSelector;
 
-    public WorkflowPublishService(WorkflowService workflowService, EngineSelector engineSelector) {
+    private final ApiKeyCryptoService apiKeyCryptoService;
+
+    public WorkflowPublishService(WorkflowService workflowService,
+                                  EngineSelector engineSelector,
+                                  ApiKeyCryptoService apiKeyCryptoService) {
         this.workflowService = workflowService;
         this.engineSelector = engineSelector;
+        this.apiKeyCryptoService = apiKeyCryptoService;
     }
 
     @Transactional
@@ -49,7 +56,13 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
             publish = new WorkflowPublish();
             publish.setWorkflowId(workflowId);
             publish.setShareKey(generateShareKey());
+            publish.setApiAccessKey(apiKeyCryptoService.encrypt(generateApiAccessKey()));
             publish.setCreatedBy(userId);
+        }
+        if (!StringUtils.hasText(publish.getApiAccessKey())) {
+            publish.setApiAccessKey(apiKeyCryptoService.encrypt(generateApiAccessKey()));
+        } else if (!apiKeyCryptoService.isEncrypted(publish.getApiAccessKey())) {
+            publish.setApiAccessKey(apiKeyCryptoService.encrypt(publish.getApiAccessKey()));
         }
 
         publish.setTitle(StringUtils.hasText(workflow.getName()) ? workflow.getName() : "Untitled workflow");
@@ -101,6 +114,16 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
 
     public ExecutionResponse executePublishedWorkflow(String shareKey, String inputData) throws Exception {
         WorkflowPublish publish = getEnabledPublish(shareKey);
+        return executePublishedWorkflow(publish, inputData);
+    }
+
+    public ExecutionResponse executePublishedWorkflowApi(String shareKey, String inputData, String apiAccessKey) throws Exception {
+        WorkflowPublish publish = getEnabledPublish(shareKey);
+        validateApiAccessKey(publish, apiAccessKey);
+        return executePublishedWorkflow(publish, inputData);
+    }
+
+    private ExecutionResponse executePublishedWorkflow(WorkflowPublish publish, String inputData) throws Exception {
         Workflow workflow = workflowService.getWorkflowForPublishedExecution(publish.getWorkflowId());
         WorkflowExecutor executor = engineSelector.selectEngine(workflow);
 
@@ -111,6 +134,20 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
             return executor.execute(workflow, inputData);
         } finally {
             WorkflowExecutionContextHolder.clear();
+        }
+    }
+
+    private void validateApiAccessKey(WorkflowPublish publish, String apiAccessKey) {
+        if (!StringUtils.hasText(apiAccessKey)) {
+            throw new ForbiddenException("缺少 API 访问密钥，请在请求头 X-PaiAgent-Api-Key 中传入");
+        }
+        if (!StringUtils.hasText(publish.getApiAccessKey())) {
+            throw new ForbiddenException("该工作流未生成 API 访问密钥，请重新发布");
+        }
+
+        String expected = apiKeyCryptoService.decrypt(publish.getApiAccessKey());
+        if (!constantTimeEquals(expected, apiAccessKey)) {
+            throw new ForbiddenException("API 访问密钥无效");
         }
     }
 
@@ -146,16 +183,32 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
         throw new RuntimeException("生成发布链接失败");
     }
 
+    private String generateApiAccessKey() {
+        return "paiagent_" + UUID.randomUUID().toString().replace("-", "")
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+    }
+
     private WorkflowPublishResponse toResponse(WorkflowPublish publish) {
         WorkflowPublishResponse response = new WorkflowPublishResponse();
         BeanUtils.copyProperties(publish, response);
+        response.setApiAccessKey(apiKeyCryptoService.decrypt(publish.getApiAccessKey()));
         response.setPublicPagePath("/p/" + publish.getShareKey());
         response.setPublicApiPath(buildPublicApiPath(publish.getShareKey()));
         return response;
     }
 
     private String buildPublicApiPath(String shareKey) {
-        return "/api/published-workflows/" + shareKey + "/execute";
+        return "/api/published-workflows/" + shareKey + "/execute-api";
+    }
+
+    private boolean constantTimeEquals(String expected, String actual) {
+        if (expected == null || actual == null) {
+            return false;
+        }
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8)
+        );
     }
 
     private String buildNodeSummary(String flowData) {
