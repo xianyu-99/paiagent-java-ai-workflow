@@ -73,6 +73,68 @@ export interface ExecutionResponse {
   errorLog?: unknown;
 }
 
+export interface WorkflowTestCase {
+  id: number;
+  workflowId: number;
+  name: string;
+  inputData: string;
+  expectedContains: string[];
+  expectedNotContains: string[];
+  expectedStatus: string;
+  requireCitation: boolean;
+  requireAudio: boolean;
+  maxDurationMs?: number;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface WorkflowTestCaseRequest {
+  name: string;
+  inputData: string;
+  expectedContains?: string[];
+  expectedNotContains?: string[];
+  expectedStatus?: string;
+  requireCitation?: boolean;
+  requireAudio?: boolean;
+  maxDurationMs?: number;
+  enabled?: boolean;
+}
+
+export interface WorkflowTestAssertion {
+  type: string;
+  passed: boolean;
+  message: string;
+}
+
+export interface WorkflowTestResult {
+  id: number;
+  runId: number;
+  caseId: number;
+  caseName: string;
+  status: 'PASSED' | 'FAILED';
+  actualOutput?: string;
+  assertionResults?: WorkflowTestAssertion[];
+  executionId?: number;
+  duration?: number;
+  errorMessage?: string;
+  createdAt?: string;
+}
+
+export interface WorkflowTestRun {
+  id: number;
+  workflowId: number;
+  status: 'RUNNING' | 'PASSED' | 'FAILED';
+  totalCount: number;
+  passedCount: number;
+  failedCount: number;
+  duration: number;
+  createdBy?: number;
+  results?: WorkflowTestResult[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface ApiResult<T> {
   code: number;
   message: string;
@@ -156,6 +218,40 @@ export const executePublishedWorkflow = (
   inputData: string
 ): Promise<ApiResult<ExecutionResponse>> => {
   return api.post(`/api/published-workflows/${shareKey}/execute`, { inputData });
+};
+
+export const listWorkflowTestCases = (workflowId: number): Promise<ApiResult<WorkflowTestCase[]>> => {
+  return api.get(`/api/workflows/${workflowId}/harness/test-cases`);
+};
+
+export const createWorkflowTestCase = (
+  workflowId: number,
+  data: WorkflowTestCaseRequest
+): Promise<ApiResult<WorkflowTestCase>> => {
+  return api.post(`/api/workflows/${workflowId}/harness/test-cases`, data);
+};
+
+export const updateWorkflowTestCase = (
+  workflowId: number,
+  caseId: number,
+  data: WorkflowTestCaseRequest
+): Promise<ApiResult<WorkflowTestCase>> => {
+  return api.put(`/api/workflows/${workflowId}/harness/test-cases/${caseId}`, data);
+};
+
+export const deleteWorkflowTestCase = (
+  workflowId: number,
+  caseId: number
+): Promise<ApiResult<void>> => {
+  return api.delete(`/api/workflows/${workflowId}/harness/test-cases/${caseId}`);
+};
+
+export const runWorkflowTestCases = (workflowId: number): Promise<ApiResult<WorkflowTestRun>> => {
+  return api.post(`/api/workflows/${workflowId}/harness/test-runs`);
+};
+
+export const listWorkflowTestRuns = (workflowId: number): Promise<ApiResult<WorkflowTestRun[]>> => {
+  return api.get(`/api/workflows/${workflowId}/harness/test-runs`);
 };
 
 export const executeWorkflow = (id: number, inputData: string): Promise<ApiResult<WorkflowExecutionPayload>> => {

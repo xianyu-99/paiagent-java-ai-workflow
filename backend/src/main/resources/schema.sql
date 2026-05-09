@@ -54,6 +54,58 @@ CREATE TABLE IF NOT EXISTS workflow_publish (
     INDEX idx_publish_updated_at (updated_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流发布表';
 
+CREATE TABLE IF NOT EXISTS workflow_test_case (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '测试用例主键 ID',
+    workflow_id BIGINT NOT NULL COMMENT '工作流 ID',
+    name VARCHAR(255) NOT NULL COMMENT '测试用例名称',
+    input_data MEDIUMTEXT NOT NULL COMMENT '测试输入',
+    expected_contains JSON NULL COMMENT '期望包含关键词',
+    expected_not_contains JSON NULL COMMENT '期望不包含关键词',
+    expected_status VARCHAR(32) NOT NULL DEFAULT 'SUCCESS' COMMENT '期望执行状态',
+    require_citation TINYINT NOT NULL DEFAULT 0 COMMENT '是否要求 RAG 引用来源',
+    require_audio TINYINT NOT NULL DEFAULT 0 COMMENT '是否要求 TTS 音频输出',
+    max_duration_ms INT NULL COMMENT '最大允许耗时',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_test_case_workflow (workflow_id),
+    INDEX idx_test_case_enabled (enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流测试用例表';
+
+CREATE TABLE IF NOT EXISTS workflow_test_run (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '测试运行主键 ID',
+    workflow_id BIGINT NOT NULL COMMENT '工作流 ID',
+    status VARCHAR(32) NOT NULL COMMENT '测试运行状态',
+    total_count INT NOT NULL DEFAULT 0 COMMENT '总用例数',
+    passed_count INT NOT NULL DEFAULT 0 COMMENT '通过数量',
+    failed_count INT NOT NULL DEFAULT 0 COMMENT '失败数量',
+    duration INT NOT NULL DEFAULT 0 COMMENT '总耗时',
+    created_by BIGINT NULL COMMENT '运行用户 ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_test_run_workflow (workflow_id),
+    INDEX idx_test_run_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流测试运行表';
+
+CREATE TABLE IF NOT EXISTS workflow_test_result (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '测试结果主键 ID',
+    run_id BIGINT NOT NULL COMMENT '测试运行 ID',
+    case_id BIGINT NULL COMMENT '测试用例 ID',
+    case_name VARCHAR(255) NOT NULL COMMENT '测试用例名称',
+    status VARCHAR(32) NOT NULL COMMENT '测试结果状态',
+    actual_output MEDIUMTEXT NULL COMMENT '实际输出',
+    assertion_results JSON NULL COMMENT '断言结果',
+    execution_id BIGINT NULL COMMENT '关联执行记录 ID',
+    duration INT NULL COMMENT '执行耗时',
+    error_message TEXT NULL COMMENT '错误信息',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识(0-未删除,1-已删除)',
+    INDEX idx_test_result_run (run_id),
+    INDEX idx_test_result_case (case_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工作流测试结果表';
+
 -- 节点定义表
 CREATE TABLE IF NOT EXISTS node_definition (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '节点定义主键 ID',

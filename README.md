@@ -19,7 +19,7 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 - 大模型应用开发练习与面试展示
 - Java 后端 AI Agent / Workflow 项目复现
 - LLM、TTS、对象存储、SSE 调试的工程化整合
-- 已支持 DAG / LangGraph 条件分支、RAG 知识库问答、工作流发布页面与 API 调用
+- 已支持 DAG / LangGraph 条件分支、RAG 知识库问答、工作流测试集、工作流发布页面与 API 调用
 
 ## 核心功能
 
@@ -102,6 +102,14 @@ curl -X POST "http://localhost:5174/api/published-workflows/{shareKey}/execute-a
   -H "X-PaiAgent-Api-Key: {apiAccessKey}" \
   -d "{\"inputData\":\"请根据知识库介绍这个项目\"}"
 ```
+
+### Workflow Test Harness
+
+- 编辑器新增“测试集”入口，保存当前工作流后可维护一组回归测试用例
+- 测试用例支持配置输入文本、期望执行状态、必须包含/不能包含的关键词、最大耗时
+- 针对 RAG / TTS 场景支持专项断言：要求输出包含 `citations`，或要求生成 `audioUrl`
+- 后端复用真实工作流引擎批量执行用例，并记录测试运行、单用例结果和断言明细
+- 适合在发布工作流前做最小回归验证，避免提示词、节点引用、RAG 配置或 TTS 配置改动后才在公开页面暴露问题
 
 ### RAG Embedding 配置
 
@@ -400,6 +408,7 @@ http://你的局域网IP:5173
 - 跑通 LangGraph4j conditional edge 条件分支和基础循环执行，并补充自动化测试
 - 增加 RAG 知识库节点：知识库创建、文本导入、自动切片、可插拔 Embedding、Qdrant 向量索引、相似度检索、向量重建和 LLM 回答
 - 增加 RAG 文件解析、异步导入和引用来源展示：支持 `txt / md / json / pdf / doc / docx`，输出来源文件、页码、分数和片段预览
+- 增加 Workflow Test Harness：支持工作流级测试用例、批量运行、关键词/RAG 引用/TTS 音频/耗时断言和历史结果记录
 - 增加工作流发布能力：支持公开页面、受 API Key 保护的正式调用接口和调用示例
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
 
@@ -410,6 +419,7 @@ http://你的局域网IP:5173
 - RAG 默认使用本地 Hash Embedding，适合演示和复现；已支持切换 DashScope Embedding，生产环境还可继续接入 BGE / OpenAI Embedding
 - RAG 已支持 MySQL JSON 向量兜底和 Qdrant 专用向量索引；超大规模知识库可继续升级 Milvus
 - RAG 已支持常见文档格式解析，但检索质量仍依赖 Embedding Provider、chunk 参数和知识库内容质量
+- Workflow Test Harness 会调用真实 LLM / RAG / TTS 链路，适合做发布前回归验证；涉及外部模型的用例耗时和稳定性仍取决于供应商接口
 - 发布 API 已有访问密钥保护，生产环境还应继续补限流、调用审计和密钥轮换
 - 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload, Space } from 'antd';
-import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined, DatabaseOutlined, ShareAltOutlined, CopyOutlined, LinkOutlined, ApiOutlined } from '@ant-design/icons';
+import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload, Space, Tag } from 'antd';
+import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined, DatabaseOutlined, ShareAltOutlined, CopyOutlined, LinkOutlined, ApiOutlined, ExperimentOutlined } from '@ant-design/icons';
 import { Edge, MarkerType, Node } from '@xyflow/react';
 import NodePanel from '../components/NodePanel';
 import FlowCanvas from '../components/FlowCanvas';
@@ -20,8 +20,15 @@ import {
   getWorkflowPublish,
   publishWorkflow,
   unpublishWorkflow,
+  createWorkflowTestCase,
+  deleteWorkflowTestCase,
+  listWorkflowTestCases,
+  listWorkflowTestRuns,
+  runWorkflowTestCases,
   Workflow,
   WorkflowPublish,
+  WorkflowTestCase,
+  WorkflowTestRun,
 } from '../api/workflow';
 import {
   createKnowledgeBase,
@@ -122,6 +129,22 @@ const EditorPage = () => {
   const [publishModalOpen, setPublishModalOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishInfo, setPublishInfo] = useState<WorkflowPublish | null>(null);
+  const [harnessModalOpen, setHarnessModalOpen] = useState(false);
+  const [harnessLoading, setHarnessLoading] = useState(false);
+  const [harnessRunning, setHarnessRunning] = useState(false);
+  const [testCases, setTestCases] = useState<WorkflowTestCase[]>([]);
+  const [testRuns, setTestRuns] = useState<WorkflowTestRun[]>([]);
+  const [latestTestRun, setLatestTestRun] = useState<WorkflowTestRun | null>(null);
+  const [newTestCase, setNewTestCase] = useState({
+    name: '',
+    inputData: '',
+    expectedContains: '',
+    expectedNotContains: '',
+    expectedStatus: 'SUCCESS',
+    requireCitation: false,
+    requireAudio: false,
+    maxDurationMs: '',
+  });
   const hasLoadedRef = useRef<number | null>(null);
   
   // LLM 节点配置状态
@@ -554,6 +577,123 @@ const EditorPage = () => {
       message.error('取消发布失败');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const parseKeywordInput = (value: string) => value
+    .split(/[\n,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const resetNewTestCase = () => {
+    setNewTestCase({
+      name: '',
+      inputData: '',
+      expectedContains: '',
+      expectedNotContains: '',
+      expectedStatus: 'SUCCESS',
+      requireCitation: false,
+      requireAudio: false,
+      maxDurationMs: '',
+    });
+  };
+
+  const refreshHarnessData = useCallback(async (workflowId: number) => {
+    setHarnessLoading(true);
+    try {
+      const [casesResult, runsResult] = await Promise.all([
+        listWorkflowTestCases(workflowId),
+        listWorkflowTestRuns(workflowId),
+      ]);
+      if (casesResult.code === 200) {
+        setTestCases(casesResult.data || []);
+      } else {
+        message.error(casesResult.message || '测试用例加载失败');
+      }
+      if (runsResult.code === 200) {
+        const runs = runsResult.data || [];
+        setTestRuns(runs);
+        setLatestTestRun(runs[0] || null);
+      }
+    } finally {
+      setHarnessLoading(false);
+    }
+  }, []);
+
+  const handleOpenHarness = async () => {
+    const workflowId = await handleSave();
+    if (!workflowId) {
+      return;
+    }
+    setHarnessModalOpen(true);
+    await refreshHarnessData(workflowId);
+  };
+
+  const handleCreateTestCase = async () => {
+    if (!currentWorkflowId) {
+      message.warning('请先保存工作流');
+      return;
+    }
+    if (!newTestCase.name.trim() || !newTestCase.inputData.trim()) {
+      message.warning('请填写测试名称和输入');
+      return;
+    }
+
+    const result = await createWorkflowTestCase(currentWorkflowId, {
+      name: newTestCase.name,
+      inputData: newTestCase.inputData,
+      expectedContains: parseKeywordInput(newTestCase.expectedContains),
+      expectedNotContains: parseKeywordInput(newTestCase.expectedNotContains),
+      expectedStatus: newTestCase.expectedStatus,
+      requireCitation: newTestCase.requireCitation,
+      requireAudio: newTestCase.requireAudio,
+      maxDurationMs: newTestCase.maxDurationMs ? Number(newTestCase.maxDurationMs) : undefined,
+      enabled: true,
+    });
+    if (result.code === 200) {
+      message.success('测试用例已添加');
+      resetNewTestCase();
+      await refreshHarnessData(currentWorkflowId);
+    } else {
+      message.error(result.message || '测试用例添加失败');
+    }
+  };
+
+  const handleDeleteTestCase = async (caseId: number) => {
+    if (!currentWorkflowId) {
+      return;
+    }
+    const result = await deleteWorkflowTestCase(currentWorkflowId, caseId);
+    if (result.code === 200) {
+      message.success('测试用例已删除');
+      await refreshHarnessData(currentWorkflowId);
+    } else {
+      message.error(result.message || '测试用例删除失败');
+    }
+  };
+
+  const handleRunHarness = async () => {
+    if (!currentWorkflowId) {
+      message.warning('请先保存工作流');
+      return;
+    }
+    if (testCases.filter((item) => item.enabled).length === 0) {
+      message.warning('请先添加测试用例');
+      return;
+    }
+
+    setHarnessRunning(true);
+    try {
+      const result = await runWorkflowTestCases(currentWorkflowId);
+      if (result.code === 200) {
+        setLatestTestRun(result.data);
+        setTestRuns((runs) => [result.data, ...runs.filter((run) => run.id !== result.data.id)].slice(0, 20));
+        message.success(`测试完成：通过 ${result.data.passedCount}/${result.data.totalCount}`);
+      } else {
+        message.error(result.message || '测试运行失败');
+      }
+    } finally {
+      setHarnessRunning(false);
     }
   };
 
@@ -1352,6 +1492,14 @@ const EditorPage = () => {
             size="large"
           >
             {publishInfo?.enabled ? '已发布' : '发布'}
+          </Button>
+          <Button
+            icon={<ExperimentOutlined />}
+            onClick={handleOpenHarness}
+            loading={harnessLoading}
+            size="large"
+          >
+            测试集
           </Button>
           <Button
             type="primary"
@@ -2357,6 +2505,186 @@ const EditorPage = () => {
         ) : (
           <div className="text-gray-500">当前工作流尚未发布。</div>
         )}
+      </Modal>
+
+      <Modal
+        title="Workflow Test Harness"
+        open={harnessModalOpen}
+        onCancel={() => setHarnessModalOpen(false)}
+        footer={[
+          <Button key="refresh" onClick={() => currentWorkflowId && refreshHarnessData(currentWorkflowId)} loading={harnessLoading}>
+            刷新
+          </Button>,
+          <Button key="run" type="primary" icon={<ExperimentOutlined />} onClick={handleRunHarness} loading={harnessRunning}>
+            运行测试集
+          </Button>,
+          <Button key="close" onClick={() => setHarnessModalOpen(false)}>
+            关闭
+          </Button>
+        ]}
+        width={960}
+      >
+        <Space direction="vertical" className="w-full" size="large">
+          <div className="rounded border bg-gray-50 p-4">
+            <div className="font-medium mb-3">新增测试用例</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Input
+                placeholder="用例名称，例如 RAG 引用校验"
+                value={newTestCase.name}
+                onChange={(e) => setNewTestCase({ ...newTestCase, name: e.target.value })}
+              />
+              <Select
+                value={newTestCase.expectedStatus}
+                onChange={(value) => setNewTestCase({ ...newTestCase, expectedStatus: value })}
+                options={[
+                  { label: '期望成功', value: 'SUCCESS' },
+                  { label: '期望失败', value: 'FAILED' }
+                ]}
+              />
+            </div>
+            <Input.TextArea
+              className="mt-3"
+              rows={3}
+              placeholder="测试输入"
+              value={newTestCase.inputData}
+              onChange={(e) => setNewTestCase({ ...newTestCase, inputData: e.target.value })}
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <Input.TextArea
+                rows={2}
+                placeholder="期望包含关键词，逗号或换行分隔"
+                value={newTestCase.expectedContains}
+                onChange={(e) => setNewTestCase({ ...newTestCase, expectedContains: e.target.value })}
+              />
+              <Input.TextArea
+                rows={2}
+                placeholder="不应包含关键词，逗号或换行分隔"
+                value={newTestCase.expectedNotContains}
+                onChange={(e) => setNewTestCase({ ...newTestCase, expectedNotContains: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-4 mt-3">
+              <Checkbox
+                checked={newTestCase.requireCitation}
+                onChange={(e) => setNewTestCase({ ...newTestCase, requireCitation: e.target.checked })}
+              >
+                要求 RAG 引用
+              </Checkbox>
+              <Checkbox
+                checked={newTestCase.requireAudio}
+                onChange={(e) => setNewTestCase({ ...newTestCase, requireAudio: e.target.checked })}
+              >
+                要求 TTS 音频
+              </Checkbox>
+              <Input
+                className="w-44"
+                type="number"
+                placeholder="最大耗时 ms"
+                value={newTestCase.maxDurationMs}
+                onChange={(e) => setNewTestCase({ ...newTestCase, maxDurationMs: e.target.value })}
+              />
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTestCase}>
+                添加用例
+              </Button>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="font-medium">测试用例</div>
+              <span className="text-sm text-gray-500">{testCases.length} 条</span>
+            </div>
+            <List
+              bordered
+              loading={harnessLoading}
+              dataSource={testCases}
+              locale={{ emptyText: '暂无测试用例' }}
+              renderItem={(item) => (
+                <List.Item
+                  actions={[
+                    <Button key="delete" danger type="link" onClick={() => handleDeleteTestCase(item.id)}>
+                      删除
+                    </Button>
+                  ]}
+                >
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <span>{item.name}</span>
+                        <Tag color={item.enabled ? 'green' : 'default'}>{item.enabled ? '启用' : '停用'}</Tag>
+                        {item.requireCitation && <Tag color="blue">引用</Tag>}
+                        {item.requireAudio && <Tag color="purple">音频</Tag>}
+                      </Space>
+                    }
+                    description={
+                      <div className="text-sm">
+                        <div className="text-gray-500 line-clamp-2">{item.inputData}</div>
+                        {item.expectedContains?.length > 0 && (
+                          <div className="mt-1">包含：{item.expectedContains.join('、')}</div>
+                        )}
+                      </div>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </div>
+
+          {latestTestRun && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="font-medium">最近运行结果</div>
+                <Space>
+                  <Tag color={latestTestRun.status === 'PASSED' ? 'green' : 'red'}>{latestTestRun.status}</Tag>
+                  <span className="text-sm text-gray-500">
+                    通过 {latestTestRun.passedCount}/{latestTestRun.totalCount}，耗时 {latestTestRun.duration}ms
+                  </span>
+                </Space>
+              </div>
+              <List
+                bordered
+                dataSource={latestTestRun.results || []}
+                locale={{ emptyText: '暂无运行详情' }}
+                renderItem={(item) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={
+                        <Space>
+                          <span>{item.caseName}</span>
+                          <Tag color={item.status === 'PASSED' ? 'green' : 'red'}>{item.status}</Tag>
+                          {item.duration !== undefined && <span className="text-gray-500 text-sm">{item.duration}ms</span>}
+                        </Space>
+                      }
+                      description={
+                        <div className="space-y-1">
+                          {(item.assertionResults || []).map((assertion, index) => (
+                            <div key={`${assertion.type}-${index}`} className={assertion.passed ? 'text-green-600' : 'text-red-600'}>
+                              {assertion.passed ? '通过' : '失败'} · {assertion.message}
+                            </div>
+                          ))}
+                          {item.errorMessage && <div className="text-red-600">{item.errorMessage}</div>}
+                        </div>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            </div>
+          )}
+
+          {testRuns.length > 0 && (
+            <div>
+              <div className="font-medium mb-2">历史运行</div>
+              <Space wrap>
+                {testRuns.slice(0, 8).map((run) => (
+                  <Tag key={run.id} color={run.status === 'PASSED' ? 'green' : 'red'}>
+                    #{run.id} {run.passedCount}/{run.totalCount} · {run.duration}ms
+                  </Tag>
+                ))}
+              </Space>
+            </div>
+          )}
+        </Space>
       </Modal>
 
       {/* 加载工作流对话框 */}
