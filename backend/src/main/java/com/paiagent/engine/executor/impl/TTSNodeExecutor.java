@@ -1,5 +1,8 @@
 package com.paiagent.engine.executor.impl;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.dashscope.aigc.multimodalconversation.AudioParameters;
 import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversation;
 import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversationParam;
@@ -11,13 +14,20 @@ import com.paiagent.service.MinioService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.net.URI;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -30,6 +40,12 @@ public class TTSNodeExecutor implements NodeExecutor {
     private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
     private static final int MAX_TTS_INPUT_LENGTH = 400;
     private static final int MAX_AUDIO_DOWNLOAD_BYTES = 50 * 1024 * 1024;
+    private static final String DEFAULT_QWEN_PROVIDER = "qwen";
+    private static final String MIMO_PROVIDER = "mimo";
+    private static final String DEFAULT_MIMO_API_URL = "https://token-plan-cn.xiaomimimo.com/v1";
+    private static final String DEFAULT_MIMO_TTS_MODEL = "mimo-v2-tts";
+    private static final String DEFAULT_MIMO_VOICE = "mimo_default";
+    private static final String DEFAULT_AUDIO_FORMAT = "wav";
     
     @Autowired
     private MinioService minioService;
@@ -37,6 +53,22 @@ public class TTSNodeExecutor implements NodeExecutor {
     @Autowired
     @Qualifier("ttsTaskExecutor")
     private Executor ttsTaskExecutor;
+
+    @Value("${MIMO_API_KEY:}")
+    private String defaultMimoApiKey;
+
+    @Value("${MIMO_API_URL:" + DEFAULT_MIMO_API_URL + "}")
+    private String defaultMimoApiUrl;
+
+    @Value("${MIMO_TTS_MODEL:" + DEFAULT_MIMO_TTS_MODEL + "}")
+    private String defaultMimoTtsModel;
+
+    @Value("${MIMO_TTS_VOICE:" + DEFAULT_MIMO_VOICE + "}")
+    private String defaultMimoTtsVoice;
+
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .build();
     
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input) throws Exception {
@@ -51,6 +83,11 @@ public class TTSNodeExecutor implements NodeExecutor {
         }
         
         Map<String, Object> data = node.getData() == null ? Map.of() : node.getData();
+        String provider = normalizeProvider(stringValue(data.getOrDefault("provider", DEFAULT_QWEN_PROVIDER)));
+        if (MIMO_PROVIDER.equals(provider)) {
+            return executeMimoTts(node, text, data, progressCallback);
+        }
+
         String apiKey = (String) data.get("apiKey");
         String model = (String) data.getOrDefault("model", "qwen3-tts-flash");
         String voiceStr = (String) data.getOrDefault("voice", "Cherry");
@@ -179,6 +216,252 @@ public class TTSNodeExecutor implements NodeExecutor {
         
         return output;
     }
+
+    private Map<String, Object> executeMimoTts(WorkflowNode node,
+                                               String text,
+                                               Map<String, Object> data,
+                                               Consumer<ExecutionEvent> progressCallback) throws Exception {
+        String apiKey = firstText(stringValue(data.get("apiKey")), defaultMimoApiKey);
+        String apiUrl = firstText(stringValue(data.get("apiUrl")), defaultMimoApiUrl, DEFAULT_MIMO_API_URL);
+        String model = firstText(stringValue(data.get("model")), defaultMimoTtsModel, DEFAULT_MIMO_TTS_MODEL);
+        String voice = firstText(stringValue(data.get("voice")), defaultMimoTtsVoice, DEFAULT_MIMO_VOICE);
+        String style = firstText(stringValue(data.get("style")), "");
+
+        if (!StringUtils.hasText(apiKey)) {
+            throw new IllegalArgumentException("MiMo API Key 不能为空，请在节点配置或环境变量 MIMO_API_KEY 中设置");
+        }
+
+        List<String> textChunks = splitText(text, MAX_TTS_INPUT_LENGTH);
+        log.info("MiMo TTS 节点执行 - API: {}, 模型: {}, 文本长度: {}, 音色: {}, 片段数: {}",
+                maskApiUrl(apiUrl), model, text.length(), voice, textChunks.size());
+
+        if (progressCallback != null) {
+            Map<String, Object> progressData = new HashMap<>();
+            progressData.put("provider", MIMO_PROVIDER);
+            progressData.put("totalChunks", textChunks.size());
+            progressData.put("currentChunk", 0);
+            progressCallback.accept(ExecutionEvent.nodeProgress(
+                    node.getId(),
+                    node.getType(),
+                    "MiMo TTS 文本已分割为 " + textChunks.size() + " 个片段",
+                    progressData
+            ));
+        }
+
+        List<CompletableFuture<byte[]>> futures = new ArrayList<>();
+        for (int i = 0; i < textChunks.size(); i++) {
+            final int chunkIndex = i;
+            final String chunk = applyMimoStyle(textChunks.get(i), style);
+            CompletableFuture<byte[]> future = CompletableFuture.supplyAsync(() -> {
+                try {
+                    if (progressCallback != null) {
+                        Map<String, Object> progressData = new HashMap<>();
+                        progressData.put("provider", MIMO_PROVIDER);
+                        progressData.put("totalChunks", textChunks.size());
+                        progressData.put("currentChunk", chunkIndex + 1);
+                        progressCallback.accept(ExecutionEvent.nodeProgress(
+                                node.getId(),
+                                node.getType(),
+                                "正在处理 MiMo TTS 第 " + (chunkIndex + 1) + "/" + textChunks.size() + " 个片段",
+                                progressData
+                        ));
+                    }
+
+                    byte[] audioData = synthesizeMimoChunk(apiUrl, apiKey, model, voice, chunk);
+
+                    if (progressCallback != null) {
+                        Map<String, Object> progressData = new HashMap<>();
+                        progressData.put("provider", MIMO_PROVIDER);
+                        progressData.put("totalChunks", textChunks.size());
+                        progressData.put("currentChunk", chunkIndex + 1);
+                        progressData.put("completedChunks", chunkIndex + 1);
+                        progressCallback.accept(ExecutionEvent.nodeProgress(
+                                node.getId(),
+                                node.getType(),
+                                "已完成 MiMo TTS 第 " + (chunkIndex + 1) + "/" + textChunks.size() + " 个片段",
+                                progressData
+                        ));
+                    }
+                    return audioData;
+                } catch (Exception e) {
+                    throw new RuntimeException("处理 MiMo TTS 第 " + (chunkIndex + 1) + " 个片段失败: " + e.getMessage(), e);
+                }
+            }, ttsTaskExecutor);
+            futures.add(future);
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        List<byte[]> audioChunks = new ArrayList<>();
+        for (CompletableFuture<byte[]> future : futures) {
+            audioChunks.add(future.get());
+        }
+
+        if (progressCallback != null) {
+            progressCallback.accept(ExecutionEvent.nodeProgress(
+                    node.getId(),
+                    node.getType(),
+                    "正在合并 " + audioChunks.size() + " 个 MiMo 音频片段...",
+                    null
+            ));
+        }
+
+        byte[] mergedAudio = mergeWavFiles(audioChunks);
+        String fileName = "audio_" + UUID.randomUUID() + ".wav";
+        String objectName = "audio/" + fileName;
+        String minioUrl = minioService.uploadFromBytes(mergedAudio, objectName, "audio/wav");
+
+        Map<String, Object> output = new HashMap<>();
+        output.put("audioUrl", minioUrl);
+        output.put("fileName", fileName);
+        output.put("output", minioUrl);
+        output.put("chunks", textChunks.size());
+        output.put("provider", MIMO_PROVIDER);
+
+        log.info("MiMo TTS 合并音频已上传到 MinIO: {}, 共 {} 个片段", minioUrl, textChunks.size());
+        return output;
+    }
+
+    private byte[] synthesizeMimoChunk(String apiUrl,
+                                       String apiKey,
+                                       String model,
+                                       String voice,
+                                       String text) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("model", model);
+
+        JSONArray messages = new JSONArray();
+        JSONObject assistantMessage = new JSONObject();
+        assistantMessage.put("role", "assistant");
+        assistantMessage.put("content", text);
+        messages.add(assistantMessage);
+        body.put("messages", messages);
+
+        JSONObject audio = new JSONObject();
+        audio.put("format", DEFAULT_AUDIO_FORMAT);
+        audio.put("voice", voice);
+        body.put("audio", audio);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(buildMimoChatCompletionsUrl(apiUrl)))
+                .timeout(Duration.ofSeconds(90))
+                .header("Authorization", "Bearer " + apiKey)
+                .header("api-key", apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body.toJSONString(), StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("MiMo TTS 调用失败，HTTP 状态码: "
+                    + response.statusCode() + ", 响应: " + summarizeForError(response.body()));
+        }
+
+        Object parsed = JSON.parse(response.body());
+        String audioData = findMimoAudioData(parsed, false);
+        if (StringUtils.hasText(audioData)) {
+            return decodeBase64Audio(audioData);
+        }
+
+        String audioUrl = findMimoAudioUrl(parsed, false);
+        if (StringUtils.hasText(audioUrl)) {
+            return downloadAudio(audioUrl);
+        }
+
+        throw new IllegalStateException("MiMo TTS 响应中未找到音频数据，请检查返回字段: "
+                + summarizeForError(response.body()));
+    }
+
+    private String buildMimoChatCompletionsUrl(String apiUrl) {
+        String normalized = stripTrailingSlash(apiUrl);
+        if (normalized.toLowerCase(Locale.ROOT).endsWith("/chat/completions")) {
+            return normalized;
+        }
+        return normalized + "/chat/completions";
+    }
+
+    private String applyMimoStyle(String text, String style) {
+        if (!StringUtils.hasText(style) || text.trim().startsWith("<style>")) {
+            return text;
+        }
+        return "<style>" + style.trim() + "</style>" + text;
+    }
+
+    private String findMimoAudioData(Object value, boolean insideAudio) {
+        if (value instanceof JSONObject object) {
+            Object audioObject = object.get("audio");
+            if (audioObject != null) {
+                String data = findMimoAudioData(audioObject, true);
+                if (StringUtils.hasText(data)) {
+                    return data;
+                }
+            }
+            Object dataObject = object.get("data");
+            if (insideAudio && dataObject instanceof String data && StringUtils.hasText(data)) {
+                return data;
+            }
+            for (String key : object.keySet()) {
+                String data = findMimoAudioData(object.get(key), insideAudio);
+                if (StringUtils.hasText(data)) {
+                    return data;
+                }
+            }
+        }
+        if (value instanceof JSONArray array) {
+            for (Object item : array) {
+                String data = findMimoAudioData(item, insideAudio);
+                if (StringUtils.hasText(data)) {
+                    return data;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String findMimoAudioUrl(Object value, boolean insideAudio) {
+        if (value instanceof JSONObject object) {
+            Object audioObject = object.get("audio");
+            if (audioObject != null) {
+                String url = findMimoAudioUrl(audioObject, true);
+                if (StringUtils.hasText(url)) {
+                    return url;
+                }
+            }
+            Object urlObject = object.get("url");
+            if (insideAudio && urlObject instanceof String url && StringUtils.hasText(url)) {
+                return url;
+            }
+            for (String key : object.keySet()) {
+                String url = findMimoAudioUrl(object.get(key), insideAudio);
+                if (StringUtils.hasText(url)) {
+                    return url;
+                }
+            }
+        }
+        if (value instanceof JSONArray array) {
+            for (Object item : array) {
+                String url = findMimoAudioUrl(item, insideAudio);
+                if (StringUtils.hasText(url)) {
+                    return url;
+                }
+            }
+        }
+        return null;
+    }
+
+    private byte[] decodeBase64Audio(String audioData) {
+        String normalized = audioData.trim();
+        int commaIndex = normalized.indexOf(',');
+        if (normalized.startsWith("data:") && commaIndex >= 0) {
+            normalized = normalized.substring(commaIndex + 1);
+        }
+        normalized = normalized.replaceAll("\\s+", "");
+        try {
+            return Base64.getDecoder().decode(normalized);
+        } catch (IllegalArgumentException ignored) {
+            return Base64.getUrlDecoder().decode(normalized);
+        }
+    }
     
     private AudioParameters.Voice convertVoice(String voiceStr) {
         try {
@@ -252,6 +535,55 @@ public class TTSNodeExecutor implements NodeExecutor {
 
     private String stringValue(Object value) {
         return value == null ? null : String.valueOf(value);
+    }
+
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String normalizeProvider(String provider) {
+        if (!StringUtils.hasText(provider)) {
+            return DEFAULT_QWEN_PROVIDER;
+        }
+        String normalized = provider.trim().toLowerCase(Locale.ROOT);
+        if ("dashscope".equals(normalized) || "aliyun".equals(normalized) || "qwen-tts".equals(normalized)) {
+            return DEFAULT_QWEN_PROVIDER;
+        }
+        if ("xiaomi".equals(normalized) || "xiaomi-mimo".equals(normalized) || "mimo-tts".equals(normalized)) {
+            return MIMO_PROVIDER;
+        }
+        return normalized;
+    }
+
+    private String stripTrailingSlash(String value) {
+        if (value == null) {
+            return "";
+        }
+        int end = value.length();
+        while (end > 0 && value.charAt(end - 1) == '/') {
+            end--;
+        }
+        return value.substring(0, end);
+    }
+
+    private String summarizeForError(String value) {
+        if (value == null) {
+            return "";
+        }
+        int maxLength = 800;
+        return value.length() <= maxLength ? value : value.substring(0, maxLength) + "...(truncated)";
+    }
+
+    private String maskApiUrl(String apiUrl) {
+        return apiUrl == null ? "" : apiUrl.replaceAll("(?i)(api[_-]?key=)[^&]+", "$1***");
     }
     
     @Override

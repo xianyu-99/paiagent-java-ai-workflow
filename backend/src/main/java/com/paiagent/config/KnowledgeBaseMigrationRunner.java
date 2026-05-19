@@ -285,7 +285,7 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     '🔊',
                     '{"type":"object","properties":{"text":{"type":"string"}}}',
                     '{"type":"object","properties":{"audioUrl":{"type":"string"},"fileName":{"type":"string"},"output":{"type":"string"},"chunks":{"type":"number"}}}',
-                    '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen3-tts-flash"},"voice":{"type":"string","default":"Cherry"},"languageType":{"type":"string","default":"Auto"}}}'
+                    '{"type":"object","properties":{"provider":{"type":"string","default":"qwen"},"apiUrl":{"type":"string"},"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen3-tts-flash"},"voice":{"type":"string","default":"Cherry"},"style":{"type":"string"},"languageType":{"type":"string","default":"Auto"}}}'
                 )
                 ON DUPLICATE KEY UPDATE
                     display_name = VALUES(display_name),

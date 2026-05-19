@@ -130,7 +130,7 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setIcon("🔊");
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"audioUrl\":{\"type\":\"string\"},\"fileName\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"},\"chunks\":{\"type\":\"number\"}}}");
-        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\",\"default\":\"qwen3-tts-flash\"},\"voice\":{\"type\":\"string\",\"default\":\"Cherry\"},\"languageType\":{\"type\":\"string\",\"default\":\"Auto\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\",\"default\":\"qwen\"},\"apiUrl\":{\"type\":\"string\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\",\"default\":\"qwen3-tts-flash\"},\"voice\":{\"type\":\"string\",\"default\":\"Cherry\"},\"style\":{\"type\":\"string\"},\"languageType\":{\"type\":\"string\",\"default\":\"Auto\"}}}");
         return nodeDefinition;
     }
 

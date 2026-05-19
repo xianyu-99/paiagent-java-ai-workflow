@@ -245,7 +245,7 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 ('tts', '超拟人音频合成', 'TOOL', '🔊',
  '{"type":"object","properties":{"text":{"type":"string"}}}',
  '{"type":"object","properties":{"audioUrl":{"type":"string"},"fileName":{"type":"string"},"output":{"type":"string"},"chunks":{"type":"number"}}}',
- '{"type":"object","properties":{"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen3-tts-flash"},"voice":{"type":"string","default":"Cherry"},"languageType":{"type":"string","default":"Auto"}}}'),
+ '{"type":"object","properties":{"provider":{"type":"string","default":"qwen"},"apiUrl":{"type":"string"},"apiKey":{"type":"string"},"model":{"type":"string","default":"qwen3-tts-flash"},"voice":{"type":"string","default":"Cherry"},"style":{"type":"string"},"languageType":{"type":"string","default":"Auto"}}}'),
 ('condition', '条件分支', 'FLOW', '🔀',
  '{"type":"object","properties":{"input":{"type":"string"},"output":{"type":"string"}}}',
  '{"type":"object","properties":{"conditionResult":{"type":"boolean"},"selectedBranch":{"type":"string"},"output":{"type":"string"}}}',

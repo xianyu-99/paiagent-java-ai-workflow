@@ -167,9 +167,12 @@ const EditorPage = () => {
 
   // TTS 节点配置状态
   const [ttsConfig, setTtsConfig] = useState({
+    provider: 'qwen',
+    apiUrl: '',
     apiKey: '',
     model: 'qwen3-tts-flash',
     voice: 'Cherry',
+    style: '',
     languageType: 'Auto',
     apiKeyConfigured: false
   });
@@ -267,9 +270,12 @@ const EditorPage = () => {
     } else if (node.data?.type === 'tts') {
       // 加载 TTS 节点配置
       setTtsConfig({
+        provider: (node.data?.provider as string) || 'qwen',
+        apiUrl: (node.data?.apiUrl as string) || '',
         apiKey: (node.data?.apiKey as string) || '',
         model: (node.data?.model as string) || 'qwen3-tts-flash',
         voice: (node.data?.voice as string) || 'Cherry',
+        style: (node.data?.style as string) || '',
         languageType: (node.data?.languageType as string) || 'Auto',
         apiKeyConfigured: Boolean(node.data?.apiKeyConfigured || node.data?.apiKey)
       });
@@ -1043,9 +1049,12 @@ const EditorPage = () => {
 
     const updatedData = {
       ...selectedNode.data,
+      provider: ttsConfig.provider,
+      apiUrl: ttsConfig.apiUrl,
       apiKey: ttsConfig.apiKey,
       model: ttsConfig.model,
       voice: ttsConfig.voice,
+      style: ttsConfig.style,
       languageType: ttsConfig.languageType,
       apiKeyConfigured: Boolean(ttsConfig.apiKey || ttsConfig.apiKeyConfigured),
       inputParams: ttsInputParams,
@@ -1369,10 +1378,14 @@ const EditorPage = () => {
       
       const updatedData = {
         ...selectedNode.data,
+        provider: ttsConfig.provider,
+        apiUrl: ttsConfig.apiUrl,
         apiKey: ttsConfig.apiKey,
         model: ttsConfig.model,
         voice: ttsConfig.voice,
+        style: ttsConfig.style,
         languageType: ttsConfig.languageType,
+        apiKeyConfigured: Boolean(ttsConfig.apiKey || ttsConfig.apiKeyConfigured),
         inputParams: ttsInputParams,
         outputParams: ttsOutputParams
       };
@@ -2003,37 +2016,73 @@ const EditorPage = () => {
                       
                       {/* 固定配置项 */}
                       <div className="mt-4 space-y-3">
-                        <Form.Item label="音色 (voice)" className="mb-0">
+                        <Form.Item label="TTS 供应商" className="mb-0">
                           <Select
-                            value={ttsConfig.voice}
-                            onChange={(value) => setTtsConfig({ ...ttsConfig, voice: value })}
+                            value={ttsConfig.provider}
+                            onChange={(value) => setTtsConfig({
+                              ...ttsConfig,
+                              provider: value,
+                              apiUrl: value === 'mimo' ? (ttsConfig.apiUrl || 'https://token-plan-cn.xiaomimimo.com/v1') : '',
+                              model: value === 'mimo' ? (ttsConfig.model === 'qwen3-tts-flash' ? 'mimo-v2-tts' : ttsConfig.model) : (ttsConfig.model === 'mimo-v2-tts' ? 'qwen3-tts-flash' : ttsConfig.model),
+                              voice: value === 'mimo'
+                                ? (['Cherry', 'Serena', 'Ethan', 'Chelsie', 'Momo', 'Vivian', 'Moon', 'Maia', 'Kai', 'Nofish', 'Bella', 'Jennifer', 'Ryan', 'Katerina', 'Aiden'].includes(ttsConfig.voice) ? 'mimo_default' : ttsConfig.voice)
+                                : (['mimo_default', 'default_zh', 'default_en'].includes(ttsConfig.voice) ? 'Cherry' : ttsConfig.voice),
+                            })}
                           >
-                            <Select.Option value="Cherry">Cherry (芊悦)</Select.Option>
-                            <Select.Option value="Serena">Serena (苏瑶)</Select.Option>
-                            <Select.Option value="Ethan">Ethan (晨煦)</Select.Option>
-                            <Select.Option value="Chelsie">Chelsie (千雪)</Select.Option>
-                            <Select.Option value="Momo">Momo (茉兔)</Select.Option>
-                            <Select.Option value="Vivian">Vivian (十三)</Select.Option>
-                            <Select.Option value="Moon">Moon (月白)</Select.Option>
-                            <Select.Option value="Maia">Maia (四月)</Select.Option>
-                            <Select.Option value="Kai">Kai (凯)</Select.Option>
-                            <Select.Option value="Nofish">Nofish (不吃鱼)</Select.Option>
-                            <Select.Option value="Bella">Bella (萌宝)</Select.Option>
-                            <Select.Option value="Jennifer">Jennifer (詹妮弗)</Select.Option>
-                            <Select.Option value="Ryan">Ryan (甜茶)</Select.Option>
-                            <Select.Option value="Katerina">Katerina (卡捷琳娜)</Select.Option>
-                            <Select.Option value="Aiden">Aiden (艾登)</Select.Option>
+                            <Select.Option value="qwen">通义千问 / DashScope</Select.Option>
+                            <Select.Option value="mimo">小米 MiMo</Select.Option>
                           </Select>
                         </Form.Item>
 
-                        <Form.Item label="语言类型 (language_type)" className="mb-0">
-                          <Select
-                            value={ttsConfig.languageType}
-                            onChange={(value) => setTtsConfig({ ...ttsConfig, languageType: value })}
-                          >
-                            <Select.Option value="Auto">Auto</Select.Option>
-                          </Select>
+                        <Form.Item label="音色 (voice)" className="mb-0">
+                          {ttsConfig.provider === 'mimo' ? (
+                            <Input
+                              placeholder="例如 mimo_default；以 MiMo 控制台支持的 voice 为准"
+                              value={ttsConfig.voice}
+                              onChange={(e) => setTtsConfig({ ...ttsConfig, voice: e.target.value })}
+                            />
+                          ) : (
+                            <Select
+                              value={ttsConfig.voice}
+                              onChange={(value) => setTtsConfig({ ...ttsConfig, voice: value })}
+                            >
+                              <Select.Option value="Cherry">Cherry (芊悦)</Select.Option>
+                              <Select.Option value="Serena">Serena (苏瑶)</Select.Option>
+                              <Select.Option value="Ethan">Ethan (晨煦)</Select.Option>
+                              <Select.Option value="Chelsie">Chelsie (千雪)</Select.Option>
+                              <Select.Option value="Momo">Momo (茉兔)</Select.Option>
+                              <Select.Option value="Vivian">Vivian (十三)</Select.Option>
+                              <Select.Option value="Moon">Moon (月白)</Select.Option>
+                              <Select.Option value="Maia">Maia (四月)</Select.Option>
+                              <Select.Option value="Kai">Kai (凯)</Select.Option>
+                              <Select.Option value="Nofish">Nofish (不吃鱼)</Select.Option>
+                              <Select.Option value="Bella">Bella (萌宝)</Select.Option>
+                              <Select.Option value="Jennifer">Jennifer (詹妮弗)</Select.Option>
+                              <Select.Option value="Ryan">Ryan (甜茶)</Select.Option>
+                              <Select.Option value="Katerina">Katerina (卡捷琳娜)</Select.Option>
+                              <Select.Option value="Aiden">Aiden (艾登)</Select.Option>
+                            </Select>
+                          )}
                         </Form.Item>
+
+                        {ttsConfig.provider === 'mimo' ? (
+                          <Form.Item label="风格标签 (style)" className="mb-0">
+                            <Input
+                              placeholder="可选，如 开心、东北话、粤语；会自动包装为 <style>...</style>"
+                              value={ttsConfig.style}
+                              onChange={(e) => setTtsConfig({ ...ttsConfig, style: e.target.value })}
+                            />
+                          </Form.Item>
+                        ) : (
+                          <Form.Item label="语言类型 (language_type)" className="mb-0">
+                            <Select
+                              value={ttsConfig.languageType}
+                              onChange={(value) => setTtsConfig({ ...ttsConfig, languageType: value })}
+                            >
+                              <Select.Option value="Auto">Auto</Select.Option>
+                            </Select>
+                          </Form.Item>
+                        )}
                       </div>
                     </div>
 
@@ -2084,9 +2133,18 @@ const EditorPage = () => {
                     {/* 基本信息 */}
                     <div className="mb-4">
                       <label className="font-medium text-gray-700 block mb-3">基本信息</label>
+                      {ttsConfig.provider === 'mimo' && (
+                        <Form.Item label="API 地址">
+                          <Input
+                            placeholder="https://token-plan-cn.xiaomimimo.com/v1"
+                            value={ttsConfig.apiUrl}
+                            onChange={(e) => setTtsConfig({ ...ttsConfig, apiUrl: e.target.value })}
+                          />
+                        </Form.Item>
+                      )}
                       <Form.Item label="API Key">
                         <Input.Password
-                          placeholder={ttsConfig.apiKeyConfigured ? '留空则沿用已保存的 API Key' : '请输入阿里百炼 API Key'}
+                          placeholder={ttsConfig.apiKeyConfigured ? '留空则沿用已保存的 API Key' : (ttsConfig.provider === 'mimo' ? '请输入 MiMo API Key' : '请输入阿里百炼 API Key')}
                           value={ttsConfig.apiKey}
                           onChange={(e) => setTtsConfig({ ...ttsConfig, apiKey: e.target.value })}
                         />
