@@ -2,6 +2,7 @@ package com.paiagent.engine.executor.impl;
 
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.model.WorkflowNode;
+import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -11,9 +12,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * 输出节点执行器
- */
 @Slf4j
 @Component
 public class OutputNodeExecutor implements NodeExecutor {
@@ -22,102 +20,87 @@ public class OutputNodeExecutor implements NodeExecutor {
     private static final String NODE_EXECUTION_COUNT_CONTEXT_KEY = "__nodeExecutionCount__";
     private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
     private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
-    
+    private static final Pattern TEMPLATE_PATTERN = Pattern.compile("\\{\\{(.*?)\\}\\}");
+
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input) {
         Map<String, Object> output = new HashMap<>();
-        
-        // 获取节点配置
         Map<String, Object> nodeData = node.getData();
         if (nodeData == null) {
-            output.put("output", input.get("output") != null ? input.get("output") : input.get("input"));
+            output.put("output", defaultOutput(input));
             return output;
         }
-        
-        // 获取 responseContent 模板
+
         String responseContent = (String) nodeData.get("responseContent");
         if (responseContent == null || responseContent.isEmpty()) {
-            output.put("output", input.get("output") != null ? input.get("output") : input.get("input"));
+            output.put("output", defaultOutput(input));
             return output;
         }
-        
-        log.debug("输出节点配置 - responseContent: {}", summarizeForLog(responseContent));
-        log.debug("输出节点配置 - outputParams: {}", summarizeForLog(nodeData.get("outputParams")));
-        log.debug("输出节点输入数据: {}", summarizeForLog(removeInternalContext(input)));
-        
-        // 获取 outputParams 配置
+
+        log.debug("Output node responseContent: {}", summarizeForLog(responseContent));
+        log.debug("Output node outputParams: {}", summarizeForLog(nodeData.get("outputParams")));
+        log.debug("Output node input: {}", summarizeForLog(removeInternalContext(input)));
+
+        @SuppressWarnings("unchecked")
         List<Map<String, Object>> outputParams = (List<Map<String, Object>>) nodeData.get("outputParams");
+        Map<String, String> paramValues = buildParamValues(outputParams, input);
+        log.debug("Output node parameter values: {}", summarizeForLog(paramValues));
+
+        String result = replaceTemplateVariables(responseContent, paramValues);
+        log.debug("Output node final result: {}", summarizeForLog(result));
+        output.put("output", result);
+        return output;
+    }
+
+    private Object defaultOutput(Map<String, Object> input) {
+        return input.get("output") != null ? input.get("output") : input.get("input");
+    }
+
+    private Map<String, String> buildParamValues(
+            List<Map<String, Object>> outputParams,
+            Map<String, Object> input
+    ) {
         Map<String, String> paramValues = new HashMap<>();
-        
-        if (outputParams != null) {
-            for (Map<String, Object> param : outputParams) {
-                String paramName = (String) param.get("name");
-                String paramType = (String) param.get("type");
-                
-                if ("input".equals(paramType)) {
-                    // 直接输入的值
-                    paramValues.put(paramName, (String) param.get("value"));
-                } else if ("reference".equals(paramType)) {
-                    // 引用其他节点的输出
-                    String reference = (String) param.get("referenceNode");
-                    log.debug("处理引用参数: {} -> {}", paramName, reference);
-                    
-                    if (reference != null && reference.contains(".")) {
-                        String[] parts = reference.split("\\.");
-                        String refNodeId = parts[0]; // 节点ID，例如 "qwen-1"
-                        String refParamName = parts[parts.length - 1]; // 参数名，例如 "response"
-                        
-                        Object refValue = null;
-                        
-                        // 优先从 input 的上层 nodeOutputs 中查找（LangGraph 场景）
-                        if (input.containsKey(NODE_OUTPUTS_CONTEXT_KEY)) {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Map<String, Object>> nodeOutputs = 
-                                (Map<String, Map<String, Object>>) input.get(NODE_OUTPUTS_CONTEXT_KEY);
-                            
-                            if (nodeOutputs != null && nodeOutputs.containsKey(refNodeId)) {
-                                Map<String, Object> nodeOutput = nodeOutputs.get(refNodeId);
-                                refValue = nodeOutput.get(refParamName);
-                                log.debug("从 nodeOutputs 中找到引用 {}.{} 的值: {}", refNodeId, refParamName, summarizeForLog(refValue));
-                            }
-                        }
-                        
-                        // 如果找不到，尝试从 input 中获取值（DAG 引擎场景）
-                        if (refValue == null) {
-                            refValue = input.get(refParamName);
-                        }
-                        
-                        // 如果找不到，尝试使用 "input" 作为 fallback（因为输入节点输出的是 input）
-                        if (refValue == null && "user_input".equals(refParamName)) {
-                            refValue = input.get("input");
-                        }
-                        
-                        log.debug("引用参数 {} 的值: {}", refParamName, summarizeForLog(refValue));
-                        
-                        if (refValue != null) {
-                            paramValues.put(paramName, refValue.toString());
-                        }
-                    }
+        if (outputParams == null) {
+            return paramValues;
+        }
+
+        for (Map<String, Object> param : outputParams) {
+            String paramName = (String) param.get("name");
+            String paramType = (String) param.get("type");
+
+            if ("input".equals(paramType)) {
+                Object value = param.get("value");
+                if (value != null) {
+                    paramValues.put(paramName, value.toString());
+                }
+                continue;
+            }
+
+            if ("reference".equals(paramType)) {
+                String reference = (String) param.get("referenceNode");
+                Object value = WorkflowReferenceResolver.resolve(reference, input);
+                if (value != null) {
+                    paramValues.put(paramName, value.toString());
                 }
             }
         }
-        
-        log.debug("参数值映射: {}", summarizeForLog(paramValues));
-        
-        // 替换模板中的 {{参数名}}
-        String result = responseContent;
-        Pattern pattern = Pattern.compile("\\{\\{(.*?)\\}\\}");
-        Matcher matcher = pattern.matcher(responseContent);
-        
+
+        return paramValues;
+    }
+
+    private String replaceTemplateVariables(String template, Map<String, String> paramValues) {
+        Matcher matcher = TEMPLATE_PATTERN.matcher(template);
+        StringBuffer result = new StringBuffer();
+
         while (matcher.find()) {
             String paramName = matcher.group(1).trim();
             String paramValue = paramValues.getOrDefault(paramName, "");
-            result = result.replace("{{" + paramName + "}}", paramValue);
+            matcher.appendReplacement(result, Matcher.quoteReplacement(paramValue));
         }
-        
-        log.debug("输出节点最终结果: {}", summarizeForLog(result));
-        output.put("output", result);
-        return output;
+        matcher.appendTail(result);
+
+        return result.toString();
     }
 
     private Map<String, Object> removeInternalContext(Map<String, Object> data) {
@@ -143,7 +126,7 @@ public class OutputNodeExecutor implements NodeExecutor {
         }
         return text.substring(0, maxLength) + "...(truncated)";
     }
-    
+
     @Override
     public String getSupportedNodeType() {
         return "output";

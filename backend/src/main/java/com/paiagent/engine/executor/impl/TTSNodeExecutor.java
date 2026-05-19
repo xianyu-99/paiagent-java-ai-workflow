@@ -10,6 +10,7 @@ import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversationR
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.model.WorkflowNode;
+import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import com.paiagent.service.MinioService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -37,7 +38,6 @@ import java.util.function.Consumer;
 @Component
 public class TTSNodeExecutor implements NodeExecutor {
     
-    private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
     private static final int MAX_TTS_INPUT_LENGTH = 400;
     private static final int MAX_AUDIO_DOWNLOAD_BYTES = 50 * 1024 * 1024;
     private static final String DEFAULT_QWEN_PROVIDER = "qwen";
@@ -484,7 +484,7 @@ public class TTSNodeExecutor implements NodeExecutor {
                     if ("input".equals(type)) {
                         return stringValue(param.get("value"));
                     } else if ("reference".equals(type)) {
-                        Object value = resolveReference(stringValue(param.get("referenceNode")), input);
+                        Object value = WorkflowReferenceResolver.resolve(stringValue(param.get("referenceNode")), input);
                         if (value != null) {
                             return String.valueOf(value);
                         }
@@ -504,33 +504,6 @@ public class TTSNodeExecutor implements NodeExecutor {
         }
         
         return stringValue(input.get("text"));
-    }
-
-    private Object resolveReference(String reference, Map<String, Object> input) {
-        if (!StringUtils.hasText(reference)) {
-            return null;
-        }
-        if (!reference.contains(".")) {
-            return input.get(reference);
-        }
-
-        String[] parts = reference.split("\\.");
-        String nodeId = parts[0];
-        String field = parts[parts.length - 1];
-        Object nodeOutputsObject = input.get(NODE_OUTPUTS_CONTEXT_KEY);
-        if (nodeOutputsObject instanceof Map<?, ?> nodeOutputs) {
-            Object nodeOutputObject = nodeOutputs.get(nodeId);
-            if (nodeOutputObject instanceof Map<?, ?> nodeOutput) {
-                Object value = nodeOutput.get(field);
-                if (value != null) {
-                    return value;
-                }
-            }
-        }
-        if ("user_input".equals(field)) {
-            return input.get("input");
-        }
-        return input.get(field);
     }
 
     private String stringValue(Object value) {

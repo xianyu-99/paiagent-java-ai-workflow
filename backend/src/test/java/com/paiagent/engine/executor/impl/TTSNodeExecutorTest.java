@@ -36,4 +36,48 @@ class TTSNodeExecutorTest {
 
         assertEquals("expected text", resolved);
     }
+
+    @Test
+    void shouldResolveNestedReferencedNodeOutput() {
+        TTSNodeExecutor executor = new TTSNodeExecutor();
+        WorkflowNode node = new WorkflowNode();
+        node.setData(Map.of(
+                "inputParams",
+                List.of(Map.of(
+                        "name", "text",
+                        "type", "reference",
+                        "referenceNode", "rag-1.payload.answer"
+                ))
+        ));
+
+        Map<String, Map<String, Object>> nodeOutputs = new HashMap<>();
+        nodeOutputs.put("rag-1", Map.of("payload", Map.of("answer", "nested text")));
+        Map<String, Object> input = new HashMap<>();
+        input.put("__nodeOutputs__", nodeOutputs);
+
+        String resolved = ReflectionTestUtils.invokeMethod(executor, "extractInputText", node, input);
+
+        assertEquals("nested text", resolved);
+    }
+
+    @Test
+    void shouldResolveUserInputCompatibilityReference() {
+        TTSNodeExecutor executor = new TTSNodeExecutor();
+        WorkflowNode node = new WorkflowNode();
+        node.setData(Map.of(
+                "inputParams",
+                List.of(Map.of(
+                        "name", "text",
+                        "type", "reference",
+                        "referenceNode", "input-default.user_input"
+                ))
+        ));
+
+        Map<String, Object> input = new HashMap<>();
+        input.put("input", "raw user text");
+
+        String resolved = ReflectionTestUtils.invokeMethod(executor, "extractInputText", node, input);
+
+        assertEquals("raw user text", resolved);
+    }
 }

@@ -3,6 +3,7 @@ package com.paiagent.engine.executor.impl;
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.dto.RetrievedChunk;
 import com.paiagent.engine.model.WorkflowNode;
+import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import com.paiagent.service.KnowledgeBaseService;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -149,7 +150,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                     return stringValue(param.get("value"));
                 }
                 if ("reference".equals(param.get("type"))) {
-                    Object value = resolveReference(stringValue(param.get("referenceNode")), input);
+                    Object value = WorkflowReferenceResolver.resolve(stringValue(param.get("referenceNode")), input);
                     if (value != null) {
                         return String.valueOf(value);
                     }
@@ -163,33 +164,6 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         }
         Object rawInput = input.get("input");
         return rawInput == null ? null : String.valueOf(rawInput);
-    }
-
-    private Object resolveReference(String reference, Map<String, Object> input) {
-        if (!StringUtils.hasText(reference)) {
-            return null;
-        }
-        if (!reference.contains(".")) {
-            return input.get(reference);
-        }
-
-        String[] parts = reference.split("\\.");
-        String nodeId = parts[0];
-        String field = parts[parts.length - 1];
-        Object nodeOutputsObject = input.get("__nodeOutputs__");
-        if (nodeOutputsObject instanceof Map<?, ?> nodeOutputs) {
-            Object nodeOutputObject = nodeOutputs.get(nodeId);
-            if (nodeOutputObject instanceof Map<?, ?> nodeOutput) {
-                Object value = nodeOutput.get(field);
-                if (value != null) {
-                    return value;
-                }
-            }
-        }
-        if ("user_input".equals(field)) {
-            return input.get("input");
-        }
-        return input.get(field);
     }
 
     private String buildContext(List<RetrievedChunk> chunks) {
