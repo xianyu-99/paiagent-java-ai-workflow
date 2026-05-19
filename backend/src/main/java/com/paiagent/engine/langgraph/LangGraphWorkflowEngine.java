@@ -8,6 +8,7 @@ import com.paiagent.engine.execution.WorkflowExecutionContextHolder;
 import com.paiagent.engine.langgraph.builder.GraphBuilder;
 import com.paiagent.engine.langgraph.state.StateManager;
 import com.paiagent.engine.model.WorkflowConfig;
+import com.paiagent.engine.validation.WorkflowConfigValidator;
 import com.paiagent.entity.ExecutionRecord;
 import com.paiagent.entity.Workflow;
 import com.paiagent.mapper.ExecutionRecordMapper;
@@ -40,6 +41,9 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
     
     @Autowired
     private StateManager stateManager;
+
+    @Autowired
+    private WorkflowConfigValidator workflowConfigValidator;
     
     @Autowired
     private ExecutionRecordMapper executionRecordMapper;
@@ -69,6 +73,7 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             
             // 1. 解析工作流配置
             WorkflowConfig config = JSON.parseObject(workflow.getFlowData(), WorkflowConfig.class);
+            workflowConfigValidator.validate(config);
             log.info("工作流配置解析完成: 节点数={}, 边数={}", 
                 config.getNodes().size(), config.getEdges().size());
             

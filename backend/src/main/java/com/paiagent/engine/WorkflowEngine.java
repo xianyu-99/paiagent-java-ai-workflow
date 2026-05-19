@@ -11,6 +11,7 @@ import com.paiagent.engine.execution.NodeExecutionRunner;
 import com.paiagent.engine.execution.WorkflowExecutionContextHolder;
 import com.paiagent.engine.model.WorkflowConfig;
 import com.paiagent.engine.model.WorkflowNode;
+import com.paiagent.engine.validation.WorkflowConfigValidator;
 import com.paiagent.entity.ExecutionRecord;
 import com.paiagent.entity.Workflow;
 import com.paiagent.mapper.ExecutionRecordMapper;
@@ -42,6 +43,9 @@ public class WorkflowEngine implements WorkflowExecutor {
     
     @Autowired
     private NodeExecutionRunner nodeExecutionRunner;
+
+    @Autowired
+    private WorkflowConfigValidator workflowConfigValidator;
     
     @Autowired
     private ExecutionRecordMapper executionRecordMapper;
@@ -77,6 +81,7 @@ public class WorkflowEngine implements WorkflowExecutor {
             }
 
             WorkflowConfig config = JSON.parseObject(workflow.getFlowData(), WorkflowConfig.class);
+            workflowConfigValidator.validate(config);
             List<WorkflowNode> sortedNodes = dagParser.parse(config);
             Map<String, WorkflowNode> nodeMap = buildNodeMap(sortedNodes);
             Map<String, List<com.paiagent.engine.model.WorkflowEdge>> incomingEdges = buildIncomingEdges(config);

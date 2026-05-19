@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 节点执行器工厂
@@ -31,5 +32,13 @@ public class NodeExecutorFactory {
             throw new RuntimeException("不支持的节点类型: " + nodeType);
         }
         return executor;
+    }
+
+    public boolean supports(String nodeType) {
+        return executors.containsKey(nodeType);
+    }
+
+    public Set<String> getSupportedNodeTypes() {
+        return Set.copyOf(executors.keySet());
     }
 }
