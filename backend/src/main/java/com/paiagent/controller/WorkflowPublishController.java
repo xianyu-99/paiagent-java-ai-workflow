@@ -33,59 +33,37 @@ public class WorkflowPublishController {
     @Operation(summary = "Publish workflow")
     @PostMapping("/api/workflows/{id}/publish")
     public Result<WorkflowPublishResponse> publishWorkflow(@PathVariable Long id, HttpServletRequest servletRequest) {
-        try {
-            return Result.success(workflowPublishService.publishWorkflow(
-                    id,
-                    AuthContext.getUserId(servletRequest),
-                    AuthContext.isAdmin(servletRequest)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowPublishService.publishWorkflow(
+                id,
+                AuthContext.getUserId(servletRequest),
+                AuthContext.isAdmin(servletRequest)
+        ));
     }
 
     @Operation(summary = "Get workflow publish status")
     @GetMapping("/api/workflows/{id}/publish")
     public Result<WorkflowPublishResponse> getPublishStatus(@PathVariable Long id, HttpServletRequest servletRequest) {
-        try {
-            return Result.success(workflowPublishService.getPublishStatus(
-                    id,
-                    AuthContext.getUserId(servletRequest),
-                    AuthContext.isAdmin(servletRequest)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowPublishService.getPublishStatus(
+                id,
+                AuthContext.getUserId(servletRequest),
+                AuthContext.isAdmin(servletRequest)
+        ));
     }
 
     @Operation(summary = "Unpublish workflow")
     @DeleteMapping("/api/workflows/{id}/publish")
     public Result<WorkflowPublishResponse> unpublishWorkflow(@PathVariable Long id, HttpServletRequest servletRequest) {
-        try {
-            return Result.success(workflowPublishService.unpublishWorkflow(
-                    id,
-                    AuthContext.getUserId(servletRequest),
-                    AuthContext.isAdmin(servletRequest)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowPublishService.unpublishWorkflow(
+                id,
+                AuthContext.getUserId(servletRequest),
+                AuthContext.isAdmin(servletRequest)
+        ));
     }
 
     @Operation(summary = "Get published workflow info")
     @GetMapping("/api/published-workflows/{shareKey}")
     public Result<PublishedWorkflowInfoResponse> getPublishedWorkflow(@PathVariable String shareKey) {
-        try {
-            return Result.success(workflowPublishService.getPublicWorkflowInfo(shareKey));
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowPublishService.getPublicWorkflowInfo(shareKey));
     }
 
     @Operation(summary = "Execute published workflow")

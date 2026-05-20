@@ -1,7 +1,6 @@
 package com.paiagent.controller;
 
 import com.paiagent.common.AuthContext;
-import com.paiagent.common.ForbiddenException;
 import com.paiagent.common.Result;
 import com.paiagent.dto.WorkflowTestCaseRequest;
 import com.paiagent.dto.WorkflowTestCaseResponse;
@@ -37,17 +36,11 @@ public class WorkflowTestHarnessController {
     @GetMapping("/test-cases")
     public Result<List<WorkflowTestCaseResponse>> listTestCases(@PathVariable Long workflowId,
                                                                 HttpServletRequest request) {
-        try {
-            return Result.success(workflowTestHarnessService.listTestCases(
-                    workflowId,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowTestHarnessService.listTestCases(
+                workflowId,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        ));
     }
 
     @Operation(summary = "Create workflow test case")
@@ -55,18 +48,12 @@ public class WorkflowTestHarnessController {
     public Result<WorkflowTestCaseResponse> createTestCase(@PathVariable Long workflowId,
                                                            @Valid @RequestBody WorkflowTestCaseRequest body,
                                                            HttpServletRequest request) {
-        try {
-            return Result.success(workflowTestHarnessService.createTestCase(
-                    workflowId,
-                    body,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowTestHarnessService.createTestCase(
+                workflowId,
+                body,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        ));
     }
 
     @Operation(summary = "Update workflow test case")
@@ -75,19 +62,13 @@ public class WorkflowTestHarnessController {
                                                            @PathVariable Long caseId,
                                                            @Valid @RequestBody WorkflowTestCaseRequest body,
                                                            HttpServletRequest request) {
-        try {
-            return Result.success(workflowTestHarnessService.updateTestCase(
-                    workflowId,
-                    caseId,
-                    body,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowTestHarnessService.updateTestCase(
+                workflowId,
+                caseId,
+                body,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        ));
     }
 
     @Operation(summary = "Delete workflow test case")
@@ -95,53 +76,35 @@ public class WorkflowTestHarnessController {
     public Result<Void> deleteTestCase(@PathVariable Long workflowId,
                                        @PathVariable Long caseId,
                                        HttpServletRequest request) {
-        try {
-            workflowTestHarnessService.deleteTestCase(
-                    workflowId,
-                    caseId,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            );
-            return Result.success();
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        workflowTestHarnessService.deleteTestCase(
+                workflowId,
+                caseId,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        );
+        return Result.success();
     }
 
     @Operation(summary = "Run workflow test cases")
     @PostMapping("/test-runs")
     public Result<WorkflowTestRunResponse> runTestCases(@PathVariable Long workflowId,
                                                         HttpServletRequest request) {
-        try {
-            return Result.success(workflowTestHarnessService.runTestCases(
-                    workflowId,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowTestHarnessService.runTestCases(
+                workflowId,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        ));
     }
 
     @Operation(summary = "List workflow test runs")
     @GetMapping("/test-runs")
     public Result<List<WorkflowTestRunResponse>> listTestRuns(@PathVariable Long workflowId,
                                                               HttpServletRequest request) {
-        try {
-            return Result.success(workflowTestHarnessService.listTestRuns(
-                    workflowId,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowTestHarnessService.listTestRuns(
+                workflowId,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        ));
     }
 
     @Operation(summary = "Get workflow test run")
@@ -149,17 +112,11 @@ public class WorkflowTestHarnessController {
     public Result<WorkflowTestRunResponse> getTestRun(@PathVariable Long workflowId,
                                                       @PathVariable Long runId,
                                                       HttpServletRequest request) {
-        try {
-            return Result.success(workflowTestHarnessService.getTestRun(
-                    workflowId,
-                    runId,
-                    AuthContext.getUserId(request),
-                    AuthContext.isAdmin(request)
-            ));
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(workflowTestHarnessService.getTestRun(
+                workflowId,
+                runId,
+                AuthContext.getUserId(request),
+                AuthContext.isAdmin(request)
+        ));
     }
 }

@@ -32,6 +32,8 @@ public class Result<T> {
      * 失败响应码
      */
     public static final Integer ERROR_CODE = 500;
+
+    public static final Integer BAD_REQUEST_CODE = 400;
     
     /**
      * 未认证响应码

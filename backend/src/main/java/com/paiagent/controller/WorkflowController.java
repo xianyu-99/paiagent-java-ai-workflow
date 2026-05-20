@@ -1,7 +1,6 @@
 package com.paiagent.controller;
 
 import com.paiagent.common.AuthContext;
-import com.paiagent.common.ForbiddenException;
 import com.paiagent.common.Result;
 import com.paiagent.dto.WorkflowRequest;
 import com.paiagent.dto.WorkflowResponse;
@@ -33,60 +32,38 @@ public class WorkflowController {
     @Operation(summary = "创建工作流")
     @PostMapping
     public Result<WorkflowResponse> createWorkflow(@Valid @RequestBody WorkflowRequest request, HttpServletRequest servletRequest) {
-        try {
-            WorkflowResponse response = workflowService.createWorkflow(request, AuthContext.getUserId(servletRequest));
-            return Result.success(response);
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        WorkflowResponse response = workflowService.createWorkflow(request, AuthContext.getUserId(servletRequest));
+        return Result.success(response);
     }
 
     @Operation(summary = "更新工作流")
     @PutMapping("/{id}")
     public Result<WorkflowResponse> updateWorkflow(@PathVariable Long id, @Valid @RequestBody WorkflowRequest request, HttpServletRequest servletRequest) {
-        try {
-            WorkflowResponse response = workflowService.updateWorkflow(
-                    id,
-                    request,
-                    AuthContext.getUserId(servletRequest),
-                    AuthContext.isAdmin(servletRequest)
-            );
-            return Result.success(response);
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        WorkflowResponse response = workflowService.updateWorkflow(
+                id,
+                request,
+                AuthContext.getUserId(servletRequest),
+                AuthContext.isAdmin(servletRequest)
+        );
+        return Result.success(response);
     }
 
     @Operation(summary = "删除工作流")
     @DeleteMapping("/{id}")
     public Result<Void> deleteWorkflow(@PathVariable Long id, HttpServletRequest servletRequest) {
-        try {
-            workflowService.deleteWorkflow(id, AuthContext.getUserId(servletRequest), AuthContext.isAdmin(servletRequest));
-            return Result.success();
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        workflowService.deleteWorkflow(id, AuthContext.getUserId(servletRequest), AuthContext.isAdmin(servletRequest));
+        return Result.success();
     }
 
     @Operation(summary = "获取工作流详情")
     @GetMapping("/{id}")
     public Result<WorkflowResponse> getWorkflow(@PathVariable Long id, HttpServletRequest servletRequest) {
-        try {
-            WorkflowResponse response = workflowService.getWorkflowById(
-                    id,
-                    AuthContext.getUserId(servletRequest),
-                    AuthContext.isAdmin(servletRequest)
-            );
-            return Result.success(response);
-        } catch (ForbiddenException e) {
-            return Result.forbidden(e.getMessage());
-        } catch (RuntimeException e) {
-            return Result.error(e.getMessage());
-        }
+        WorkflowResponse response = workflowService.getWorkflowById(
+                id,
+                AuthContext.getUserId(servletRequest),
+                AuthContext.isAdmin(servletRequest)
+        );
+        return Result.success(response);
     }
 
     @Operation(summary = "查询工作流列表")
