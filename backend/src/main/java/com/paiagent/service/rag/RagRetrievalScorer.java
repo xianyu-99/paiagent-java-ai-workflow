@@ -20,7 +20,7 @@ public class RagRetrievalScorer {
 
     private static final List<String> QUERY_STOP_PHRASES = Arrays.asList(
             "请问", "帮我", "我想", "如何", "怎么", "怎样", "什么", "哪些", "为什么",
-            "是否", "能否", "可以", "能够", "需要", "一下", "这个", "那个"
+            "是否", "能否", "可以", "能够", "需要", "一下", "这个", "那个", "提示"
     );
 
     public List<String> searchTerms(String query) {

@@ -90,6 +90,72 @@ class WorkflowConfigValidatorTest {
     }
 
     @Test
+    void shouldRejectReferenceToMissingNode() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("output-1", "output", Map.of(
+                                "type", "output",
+                                "outputParams", List.of(Map.of(
+                                        "name", "answer",
+                                        "type", "reference",
+                                        "referenceNode", "missing-node.output"
+                                ))
+                        ))
+                ),
+                List.of(edge("e1", "input-1", "output-1"))
+        );
+
+        WorkflowValidationException error = assertThrows(
+                WorkflowValidationException.class,
+                () -> validator.validate(config)
+        );
+
+        assertTrue(error.getMessage().contains("references missing node"));
+    }
+
+    @Test
+    void shouldRejectUnsupportedConditionBranchHandle() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("condition-1", "condition"),
+                        node("output-1", "output")
+                ),
+                List.of(
+                        edge("e1", "input-1", "condition-1"),
+                        edge("e2", "condition-1", "output-1", "maybe")
+                )
+        );
+
+        WorkflowValidationException error = assertThrows(
+                WorkflowValidationException.class,
+                () -> validator.validate(config)
+        );
+
+        assertTrue(error.getMessage().contains("unsupported branch handle"));
+    }
+
+    @Test
+    void shouldRejectMultipleEntryNodes() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("input-2", "input"),
+                        node("output-1", "output")
+                ),
+                List.of(edge("e1", "input-1", "output-1"))
+        );
+
+        WorkflowValidationException error = assertThrows(
+                WorkflowValidationException.class,
+                () -> validator.validate(config)
+        );
+
+        assertTrue(error.getMessage().contains("exactly one entry node"));
+    }
+
+    @Test
     void shouldTreatNullEdgesAsEmpty() {
         WorkflowConfig config = config(List.of(node("input-1", "input")), null);
 
@@ -104,18 +170,27 @@ class WorkflowConfigValidatorTest {
     }
 
     private WorkflowNode node(String id, String type) {
+        return node(id, type, Map.of("type", type));
+    }
+
+    private WorkflowNode node(String id, String type, Map<String, Object> data) {
         WorkflowNode node = new WorkflowNode();
         node.setId(id);
         node.setType(type);
-        node.setData(Map.of("type", type));
+        node.setData(data);
         return node;
     }
 
     private WorkflowEdge edge(String id, String source, String target) {
+        return edge(id, source, target, null);
+    }
+
+    private WorkflowEdge edge(String id, String source, String target, String sourceHandle) {
         WorkflowEdge edge = new WorkflowEdge();
         edge.setId(id);
         edge.setSource(source);
         edge.setTarget(target);
+        edge.setSourceHandle(sourceHandle);
         return edge;
     }
 

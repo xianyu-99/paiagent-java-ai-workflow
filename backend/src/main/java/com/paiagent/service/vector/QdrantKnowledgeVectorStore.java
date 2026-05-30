@@ -119,9 +119,7 @@ public class QdrantKnowledgeVectorStore implements KnowledgeVectorStore {
         String prefix = StringUtils.hasText(properties.getCollectionPrefix())
                 ? properties.getCollectionPrefix()
                 : "paiagent_chunks";
-        return sanitize(prefix)
-                + "_" + sanitize(textEmbeddingService.provider())
-                + "_" + textEmbeddingService.dimensions();
+        return sanitize(prefix);
     }
 
     private void ensureCollection() {

@@ -113,6 +113,7 @@ Key features:
 
 ## Development Notes
 
+- In this Windows environment, `rg` is not available. Use native PowerShell commands such as `Get-ChildItem` for file discovery and `Select-String` for text search instead of trying `rg` first.
 - Backend API requires authentication token in `Authorization` header
 - Frontend stores token in Zustand store and localStorage
 - ReactFlow node types must match backend `NodeExecutor` implementations

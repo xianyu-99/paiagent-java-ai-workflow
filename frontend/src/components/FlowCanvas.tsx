@@ -159,7 +159,7 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
           ...(type === 'condition'
             ? {
                 leftType: 'reference',
-                leftReference: 'input-default.user_input',
+                leftReference: 'input-default.input',
                 operator: 'contains',
                 rightValue: '',
                 caseSensitive: false,
@@ -170,7 +170,7 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
                 topK: 3,
                 minScore: 0,
                 prompt: '',
-                inputParams: [{ name: 'question', type: 'reference', referenceNode: 'input-default.user_input' }],
+                inputParams: [{ name: 'question', type: 'reference', referenceNode: 'input-default.input' }],
                 outputParams: [{ name: 'output', type: 'string' }],
               }
             : {}),

@@ -1,25 +1,27 @@
 # PaiAgent Java AI Workflow
 
-基于 Java 21、Spring Boot、ReactFlow 的 AI 工作流可视化编排平台。项目支持通过拖拽方式组合 `input -> rag -> llm -> tts -> output` 等节点，将大模型调用、知识库检索、语音合成、文件存储、执行调试和工作流发布封装成可复用的 AI 应用能力。
+基于 Java 21、Spring Boot、ReactFlow 的企业内部服务台 / 知识流程助手平台。项目支持通过拖拽方式组合 `Input -> RAG -> LLM -> Condition -> Output` 等节点，让 IT、HR、行政、客服等场景可以基于企业知识库生成带引用答案，并按置信度自动决定直接回答、创建工单或升级人工。
 
-本仓库基于 [itwanger/PaiAgent](https://github.com/itwanger/PaiAgent) 进行本地复现与二次增强，保留原项目的可视化工作流核心思路，并补充了用户体系、敏感配置加密、TTS + MinIO 完整链路、Docker Compose 部署等工程化能力。
+本仓库基于 [itwanger/PaiAgent](https://github.com/itwanger/PaiAgent) 进行本地复现与二次增强，保留原项目的可视化工作流核心思路，并补充了用户体系、敏感配置加密、Docker Compose 部署等工程化能力。当前项目主线收口为企业内部服务台 / 知识流程助手，TTS、ai-podcast 等语音内容能力只作为可选增强，不作为核心演示链路。
 
 ## 项目定位
 
-PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：用户不直接写代码，而是在画布上拖拽节点，配置模型和参数，然后由后端工作流引擎按节点依赖关系执行。
+PaiAgent 是一个**基于 Spring Boot 3 + Java 21 虚拟线程 + ReactFlow 的 AI 工作流（Agent Workflow）编排与 RAG 知识库双引擎执行平台**。它填补了 Java 生态中轻量级可视化大模型应用开发框架的空白，为 Java 开发者提供了一套**开箱即用、性能优异、安全合规的大模型工程化落地范例**。
 
-典型链路：
+### 🎯 核心场景
 
+主线场景是企业内部员工提问：
 ```text
-用户输入 -> RAG 检索知识库 -> LLM 生成回答 -> TTS 合成语音 -> MinIO 保存音频 -> 发布页面/API 调用
+用户提问 -> RAG 检索企业知识库 -> LLM 生成结构化答案 -> Condition 节点条件判断是否解决 -> Output 节点输出（直接回答 / 工单摘要 / 升级人工）
 ```
+本地演示在没有真实大模型 Key 时，默认使用内置结构化 Demo Fallback 链路，极易进行离线调试与功能验收。
 
-适合用于：
+### 🚀 适合用于
 
-- 大模型应用开发练习与面试展示
-- Java 后端 AI Agent / Workflow 项目复现
-- LLM、TTS、对象存储、SSE 调试的工程化整合
-- 已支持 DAG / LangGraph 条件分支、RAG 知识库问答、工作流测试集、工作流发布页面与 API 调用
+- **Java 大模型应用开发与面试加分展示**：项目深度整合 Spring AI，提供了完整的企业级 Agent 工程实践。
+- **Java 虚拟线程高并发实践**：全链路适配 Java 21 Virtual Threads，优化长连接 I/O 阻塞场景下的并发性能。
+- **AI 编排引擎与状态图演练**：包含 DAG 执行器（拓扑排序与循环检测）和 LangGraph4j 状态图执行器双引擎。
+- **RAG 向量检索与性能调优**：支持 MySQL 本地 JSON 向量与 Qdrant 专用向量库，针对相似度查询做字段投影与内存调优，演示海量切片下的内存控制。
 
 ## 核心功能
 
@@ -65,7 +67,7 @@ PaiAgent 可以理解为一个轻量版 Dify / Coze 类平台的 Java 实现：�
 
 ### TTS + MinIO 音频节点
 
-TTS 节点已经实现完整链路：
+TTS 保留为可选增强，用于朗读最终答案或做语音问答演示：
 
 - 超过 600 字符的文本会按标点智能分段
 - 每个文本分段独立调用 TTS API
@@ -79,10 +81,10 @@ TTS 节点已经实现完整链路：
 - 支持粘贴导入文本内容，也支持本地 `txt / md / json / pdf / doc / docx` 文件上传
 - 后端自动按长度和标点进行文本切片
 - 支持可插拔 Embedding Provider：默认本地 Hash Embedding，可切换 DashScope `text-embedding-v4`
-- 支持可插拔 VectorStore：默认 MySQL JSON 向量兜底，Docker Compose 演示环境可启用 Qdrant
+- 支持 Qdrant 向量索引进行语义检索
 - 支持知识库向量索引重建，避免切换 Embedding 模型后新旧向量混用
 - 使用向量相似度、关键词匹配和 rerank 分数召回相关知识片段
-- RAG 节点先召回相关知识片段，再将 `context + question` 拼入 LLM 提示词生成回答
+- RAG 节点可只召回相关知识片段，也可将 `context + question` 拼入 LLM 提示词生成回答
 - RAG 输出包含结构化 `citations`，发布页面会展示来源文件、页码、分数和片段预览
 - 节点执行过程通过 `NODE_PROGRESS` 推送“检索中 / 检索完成”等状态
 
@@ -134,20 +136,13 @@ RAG_EMBEDDING_BATCH_SIZE=16
 
 ### RAG VectorStore 配置
 
-默认本地开发使用 MySQL 存向量，便于最小复现：
+RAG 向量检索使用 Qdrant，配置示例：
 
 ```env
-RAG_VECTOR_STORE_PROVIDER=mysql
-```
-
-如果要使用 Qdrant 做专用向量索引，可以配置：
-
-```env
-RAG_VECTOR_STORE_PROVIDER=qdrant
 QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
 QDRANT_COLLECTION_PREFIX=paiagent_chunks
-RAG_VECTOR_STORE_FALLBACK_TO_MYSQL=true
+QDRANT_TIMEOUT_MS=30000
 ```
 
 Qdrant collection 会按 Embedding 类型和维度自动隔离，例如 `paiagent_chunks_local_256`、`paiagent_chunks_dashscope_1024`，避免不同维度的向量混写。
@@ -193,7 +188,7 @@ Qdrant collection 会按 Embedding 类型和维度自动隔离，例如 `paiagen
 | AI 调用 | Spring AI、OpenAI Compatible API、DashScope / Qwen、Zhipu GLM |
 | 工作流 | 自研 DAG 引擎、LangGraph4j 状态图引擎 |
 | 数据库 | MySQL |
-| 向量库 | Qdrant，可回退 MySQL JSON 向量 |
+| 向量库 | Qdrant |
 | 缓存 | Redis |
 | 文件存储 | MinIO |
 | 前端 | React 18、TypeScript、Vite、ReactFlow、Ant Design、Zustand |
@@ -344,9 +339,10 @@ docker compose up -d --build
 访问地址：
 
 ```text
-前端：http://localhost:5173
+前端：http://localhost:5174
 后端 Swagger：http://localhost:8085/swagger-ui.html
-MinIO Console：http://localhost:9001
+MinIO Console：http://localhost:9003
+Qdrant：http://localhost:6333/dashboard
 ```
 
 外部依赖版：
@@ -385,19 +381,51 @@ http://你的局域网IP:5173
 
 ## 推荐演示流程
 
-1. 登录系统，创建一个知识库。
-2. 上传一份 `pdf / docx / txt` 文档，等待异步导入完成。
-3. 在编辑器创建工作流：`Input -> RAG -> LLM -> TTS -> Output`。
-4. RAG 节点选择刚才的知识库，问题来源引用 `Input.user_input`。
-5. LLM 节点选择全局模型配置，TTS 节点配置语音合成参数。
-6. 点击调试，观察节点执行日志、RAG 命中片段、TTS 合成耗时和最终音频输出。
+1. 登录系统，确认已有默认知识库 `企业服务台示例知识库`。
+2. 打开默认工作流 `企业服务台助手`，或在编辑器新建企业服务台模板。
+3. 工作流主线为 `Input -> RAG -> LLM -> Condition -> Output`。
+4. LLM 节点选择全局模型配置，默认使用 `service-desk-answer` skill；无 LLM Key 时，本地企业 skill 可走结构化 demo fallback，便于离线演示。
+5. 输入示例问题：`我连不上公司 VPN，提示证书过期，怎么办？`
+6. 点击调试，观察 RAG 命中片段、结构化 JSON 输出和业务卡片展示。
 7. 点击发布，复制公开页面进行演示，复制 API 地址和访问密钥给外部程序调用。
+
+## 可展示版本验收
+
+建议在对外演示或继续改 UI 前先跑一遍最小闭环：
+
+```powershell
+.\scripts\smoke-service-desk.ps1
+```
+
+脚本会依次执行：
+
+1. `backend` 下运行 `mvn test`。
+2. `frontend` 下运行 `npm run build`。
+3. 如果 `http://localhost:8085` 没有可用后端，会临时执行 `mvn spring-boot:run` 并在结束后停止。
+4. 使用默认管理员 `admin / admin123` 登录，查找默认工作流 `企业服务台助手`。
+5. 真实提交示例问题 `我连不上公司 VPN，提示证书过期，怎么办？`。
+6. 断言工作流返回 `SUCCESS`，且最终 `outputData` 仍是业务对象，不是 JSON 字符串。
+7. 断言业务对象包含 `answer / citations / confidence / resolved / nextAction`，并且 VPN 示例问题只展示相关引用来源。
+
+如果后端已由 Docker 或本地进程启动，可以禁止脚本自动启动后端：
+
+```powershell
+.\scripts\smoke-service-desk.ps1 -NoAutoStartBackend
+```
+
+如果只想复测 API 闭环，可以跳过耗时较长的测试和前端构建：
+
+```powershell
+.\scripts\smoke-service-desk.ps1 -SkipBackendTests -SkipFrontendBuild
+```
+
+脚本会真实执行一次工作流，因此会新增一条执行记录；它不会删除数据库、volume 或工作流配置。
 
 ## 已完成的增强
 
 - 完成本地后端、前端、MySQL、Redis、MinIO 联调
 - 完成 Qwen / Zhipu LLM 节点调用验证
-- 完成 `input -> llm -> tts -> output` 工作流链路
+- 完成 `Input -> RAG -> LLM -> Condition -> Output` 企业服务台默认工作流链路
 - 修复 MinIO 预签名 URL 在浏览器侧不可访问的问题
 - 增加工作流删除、二次确认和列表刷新
 - 增加注册、登录、角色权限和用户工作流隔离
@@ -417,23 +445,43 @@ http://你的局域网IP:5173
 - DAG 引擎是当前主要稳定路径，适合常规工作流执行
 - LangGraph4j 已支持条件分支和基础循环，但复杂 Agent 状态流、人工中断、检查点恢复仍属于后续增强方向
 - RAG 默认使用本地 Hash Embedding，适合演示和复现；已支持切换 DashScope Embedding，生产环境还可继续接入 BGE / OpenAI Embedding
-- RAG 已支持 MySQL JSON 向量兜底和 Qdrant 专用向量索引；超大规模知识库可继续升级 Milvus
+- RAG 使用 Qdrant 进行语义向量检索，搭配 MySQL 关键词匹配做 Hybrid 召回；超大规模知识库可继续升级 Milvus
 - RAG 已支持常见文档格式解析，但检索质量仍依赖 Embedding Provider、chunk 参数和知识库内容质量
-- Workflow Test Harness 会调用真实 LLM / RAG / TTS 链路，适合做发布前回归验证；涉及外部模型的用例耗时和稳定性仍取决于供应商接口
+- 企业服务台 skill 支持本地结构化 demo fallback，用于无 LLM Key 的演示和验收；生产环境应接入真实 LLM Provider，并按企业知识源与权限重新配置
+- TTS / ai-podcast 只作为语音朗读或内容生成增强，不影响企业服务台主线
+- Workflow Test Harness 会调用真实 LLM / RAG / TTS 链路，适合做发布前回归验证；使用 fallback 的用例只代表本地结构化演示，不代表真实模型质量
 - 发布 API 已有访问密钥保护，生产环境还应继续补限流、调用审计和密钥轮换
+- README、`.env.example` 和 Compose 示例中的 `admin123`、`123456`、`minioadmin` 等弱密码 / 默认凭证仅用于本地 demo，生产部署必须替换为强随机密钥并关闭或修改默认管理员
+- 当前测试和本地启动会提示 SLF4J 多绑定、Commons Logging discovery，以及 devtools / PowerShell 重定向下的中文日志乱码；这些属于本地开发边界，生产镜像应统一日志依赖并关闭 devtools
 - 执行中断、工作流发布版本、执行快照等高级可靠性能力仍可继续扩展
 
 ## 简历描述参考
 
-> PaiAgent Java AI Workflow：基于 Spring Boot + ReactFlow 的 AI 工作流可视化编排平台。负责复现并增强工作流执行链路，设计 DAG 工作流引擎完成节点拓扑排序、循环检测、上下文传递和 if/else 条件分支执行；接入 LangGraph4j 状态图引擎，支持 conditional edge 条件路由和基础循环状态流；实现 RAG 知识库节点，支持文本导入、自动切片、可插拔 Embedding Provider、本地 Hash / DashScope 向量化切换、Qdrant 向量索引、MySQL 兜底检索、向量索引重建、相似度检索和基于检索上下文的 LLM 回答；接入 Qwen、Zhipu 等 OpenAI Compatible 大模型，支持全局模型配置和节点引用；实现 TTS 长文本智能分段、多次调用、WAV 合并和 MinIO 预签名 URL 输出；补充节点超时、失败重试、运行中状态记录和结构化错误日志；实现 JWT + Redis 登录态、BCrypt 密码加密、用户角色权限、API Key AES/GCM 加密存储和 Docker Compose 一键部署。
+> **项目名称**：PaiAgent Java AI Workflow (基于 Java 21 + ReactFlow 的双引擎 AI 工作流与 RAG 平台)  
+>   
+> **项目描述**：  
+> 本项目是专为企业智能服务台与知识库问答设计的可视化 AI Agent 工作流编排系统。通过 ReactFlow 拖拽组合 `Input -> RAG -> LLM -> Condition -> Output` 节点，结合企业私有知识库生成规范答复，并按置信度自动进行直接回答、生成工单摘要或升级人工客服。  
+>   
+> **核心职责与技术要点**：  
+> 1. **高并发虚拟线程调优**：基于 **Java 21 + Spring Boot 3** 开启 **Virtual Threads (虚拟线程)** 支持。在多路并发执行流图、高频调用第三方 LLM/RAG API 等 I/O 密集型场景下，极大降低系统线程开销，提升服务吞吐量。  
+> 2. **双引擎工作流编排**：  
+>    - 设计实现 **DAG 引擎**：使用 **Kahn 拓扑排序算法** 确定节点执行链，引入 **DFS 深度优先搜索算法** 实现图循环依赖检测，保障流图运行可靠性。  
+>    - 整合 **LangGraph4j 状态图引擎**：支持复杂 Agent 的条件分支（Conditional Edge）与状态反馈循环，提供最大迭代次数熔断保护。  
+> 3. **RAG 向量检索与混合召回**：  
+>    - 向量语义检索统一使用 **Qdrant** ANN 索引，关键词检索使用 MySQL `LIKE` 查询，两路召回后加权融合重排。  
+>    - 整合 DashScope / local 嵌入模型，实现文本切片（Chunking）、向量索引重建（Reindex）及召回分数的 Hybrid 混合检索。  
+> 4. **企业级工程化与数据安全**：  
+>    - 设计**敏感配置加密体系**：对敏感数据（大模型 API Key、全局配置等）在库中进行 **AES/GCM** 对称加密，在接口返回时对不同角色做脱敏处理，提供启动时明文 key 自动平滑迁移。  
+>    - 完善执行可靠性，引入流图节点超时（Timeout）、指数退避重试（Retry with Backoff）以及基于 **Server-Sent Events (SSE)** 的流式执行状态推送。  
+>    - 实现基于 JWT + Redis 刷新令牌的账户体系与权限控制，支持 Docker Compose + Nginx 一键容器化部署。
 
 ## 后续规划
 
-项目当前按“可视化 AI 工作流编排 + RAG 知识库 + 工作流发布调用平台”收口，不再继续横向扩展大量新节点。后续只保留三类增强：
+项目当前按“企业内部服务台 / 知识流程助手 + 可视化 AI 工作流编排 + RAG 知识库 + 工作流发布调用平台”收口，不再继续横向扩展大量新节点。后续只保留三类必要增强：
 
 - RAG 检索质量：优化 chunk overlap、rerank、引用展示和多文档召回效果
 - 发布调用安全：增加调用次数统计、限流、API Key 轮换和调用审计
-- 演示部署闭环：完善示例工作流、截图、环境变量说明和局域网/外部部署说明
+- 演示部署闭环：完善示例工作流、截图、环境变量说明和本地/外部部署说明
 
 ## 项目来源
 

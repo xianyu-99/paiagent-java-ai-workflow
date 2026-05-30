@@ -35,6 +35,7 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
 
     private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
     private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
+    private static final String EXECUTION_FLOW_ID_CONTEXT_KEY = "__executionFlowId__";
     
     @Autowired
     private GraphBuilder graphBuilder;
@@ -155,7 +156,7 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             }
             response.setNodeResults(nodeResults);
             
-            response.setOutputData(outputDataJson);
+            response.setOutputData(outputData);
             response.setDuration(duration);
             response.setErrorMessage(errorMessage);
             response.setErrorLog(record.getErrorLog());
@@ -234,5 +235,6 @@ public class LangGraphWorkflowEngine implements WorkflowExecutor {
             currentInput.put(EXECUTION_USER_ID_CONTEXT_KEY, userId);
         }
         currentInput.put(EXECUTION_ADMIN_CONTEXT_KEY, admin);
+        currentInput.put(EXECUTION_FLOW_ID_CONTEXT_KEY, workflow.getId());
     }
 }

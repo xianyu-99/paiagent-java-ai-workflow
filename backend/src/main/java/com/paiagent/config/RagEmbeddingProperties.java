@@ -10,9 +10,9 @@ import org.springframework.stereotype.Component;
 public class RagEmbeddingProperties {
 
     /**
-     * local: 本地 Hash Embedding；dashscope: 阿里云百炼 OpenAI 兼容 Embedding。
+     * dashscope: 阿里云百炼 OpenAI 兼容 Embedding。
      */
-    private String provider = "local";
+    private String provider = "dashscope";
 
     private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 

@@ -21,18 +21,26 @@ public final class WorkflowReferenceResolver {
         String[] parts = reference.split("\\.", 2);
         String nodeId = parts[0];
         String fieldPath = parts.length > 1 ? parts[1] : "";
-
-        Object value = resolveFromNodeOutputs(nodeId, fieldPath, runtimeInput);
-        if (value != null) {
-            return value;
-        }
-
-        value = resolvePath(runtimeInput, fieldPath);
-        if (value != null) {
-            return value;
-        }
-
         String lastField = lastSegment(fieldPath);
+
+        Object nodeOutputsObject = runtimeInput.get(NODE_OUTPUTS_CONTEXT_KEY);
+        if (nodeOutputsObject instanceof Map<?, ?> nodeOutputs) {
+            Object nodeOutput = nodeOutputs.get(nodeId);
+            Object value = resolvePath(nodeOutput, fieldPath);
+            if (value != null) {
+                return value;
+            }
+            if ("user_input".equals(lastField)) {
+                return runtimeInput.get("input");
+            }
+            return null;
+        }
+
+        Object value = resolvePath(runtimeInput, fieldPath);
+        if (value != null) {
+            return value;
+        }
+
         value = runtimeInput.get(lastField);
         if (value != null) {
             return value;
@@ -43,20 +51,6 @@ public final class WorkflowReferenceResolver {
         }
 
         return null;
-    }
-
-    private static Object resolveFromNodeOutputs(
-            String nodeId,
-            String fieldPath,
-            Map<String, Object> runtimeInput
-    ) {
-        Object nodeOutputsObject = runtimeInput.get(NODE_OUTPUTS_CONTEXT_KEY);
-        if (!(nodeOutputsObject instanceof Map<?, ?> nodeOutputs)) {
-            return null;
-        }
-
-        Object nodeOutput = nodeOutputs.get(nodeId);
-        return resolvePath(nodeOutput, fieldPath);
     }
 
     private static Object resolvePath(Object source, String fieldPath) {

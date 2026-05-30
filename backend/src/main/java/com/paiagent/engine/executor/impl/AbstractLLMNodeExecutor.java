@@ -1,9 +1,12 @@
 package com.paiagent.engine.executor.impl;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONException;
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.llm.ChatClientFactory;
 import com.paiagent.engine.llm.LLMNodeConfig;
+import com.paiagent.engine.llm.LLMProviderRegistry;
 import com.paiagent.engine.llm.PromptTemplateService;
 import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.engine.skill.Skill;
@@ -65,7 +68,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input,
                                        Consumer<ExecutionEvent> progressCallback) throws Exception {
-        // 1. 提取节点配置
+        // 1. 提取并验证节点配置
         LLMNodeConfig config = extractConfig(node);
         validateResolvedConfig(config);
         String provider = config.getProvider();
@@ -140,7 +143,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
                 llmResponse.getTotalTokens());
 
         // 7. 构建输出
-        Map<String, Object> output = buildOutput(llmResponse, config.getOutputParams());
+        Map<String, Object> output = buildOutput(llmResponse, config.getOutputParams(), config.getSkillName());
         log.debug("{} 节点输出: {}", provider.toUpperCase(Locale.ROOT), summarizeForLog(output));
 
         return output;
@@ -339,7 +342,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
                 config.setTemperature(globalConfig.getTemperature() != null
                         ? globalConfig.getTemperature().doubleValue()
                         : 0.7);
-                config.setProvider(canonicalizeProvider(trimString(globalConfig.getProvider())));
+                config.setProvider(LLMProviderRegistry.normalizeProvider(trimString(globalConfig.getProvider())));
                 log.info("{} 使用全局配置: {}", config.getProvider().toUpperCase(Locale.ROOT), globalConfig.getConfigName());
             } else {
                 log.warn("{} 全局配置不存在: {}", getNodeType().toUpperCase(), configId);
@@ -353,6 +356,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
         if (isBlank(config.getProvider())) {
             config.setProvider(resolveProvider(node, data));
         }
+        config.setApiUrl(LLMProviderRegistry.resolveBaseUrl(config.getProvider(), config.getApiUrl()));
         config.setPromptTemplate((String) data.get("prompt"));
         config.setInputParams((List<Map<String, Object>>) data.get("inputParams"));
         config.setOutputParams((List<Map<String, Object>>) data.get("outputParams"));
@@ -363,7 +367,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
     }
 
     private void applyNodeLevelConfig(LLMNodeConfig config, Map<String, Object> data) {
-        config.setProvider(canonicalizeProvider(trimString(data.get("provider"))));
+        config.setProvider(LLMProviderRegistry.normalizeProvider(trimString(data.get("provider"))));
         config.setApiUrl(trimString(data.get("apiUrl")));
         config.setApiKey(trimString(data.get("apiKey")));
         config.setModel(trimString(data.get("model")));
@@ -386,30 +390,14 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
     private String resolveProvider(WorkflowNode node, Map<String, Object> data) {
         String configuredProvider = trimString(data.get("provider"));
         if (!isBlank(configuredProvider)) {
-            return canonicalizeProvider(configuredProvider);
+            return LLMProviderRegistry.normalizeProvider(configuredProvider);
         }
 
         if ("llm".equals(node.getType())) {
             return null;
         }
 
-        return canonicalizeProvider(node.getType());
-    }
-
-    private String canonicalizeProvider(String provider) {
-        if (provider == null) {
-            return null;
-        }
-
-        String normalized = provider.trim().toLowerCase(Locale.ROOT);
-
-        return switch (normalized) {
-            case "stepfun", "阶跃星辰" -> "step";
-            case "通义千问" -> "qwen";
-            case "智谱" -> "zhipu";
-            case "ai ping" -> "ai_ping";
-            default -> normalized;
-        };
+        return LLMProviderRegistry.normalizeProvider(node.getType());
     }
 
     private boolean isBlank(String value) {
@@ -421,17 +409,36 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
      */
     @SuppressWarnings("unchecked")
     protected Map<String, Object> buildOutput(LLMResponse llmResponse, List<Map<String, Object>> outputParams) {
+        return buildOutput(llmResponse, outputParams, null);
+    }
+
+    private Map<String, Object> buildOutput(LLMResponse llmResponse,
+                                            List<Map<String, Object>> outputParams,
+                                            String skillName) {
         Map<String, Object> output = new HashMap<>();
         
         String content = llmResponse.getContent();
+        Object structuredContent = EnterpriseSkillOutputContract.normalize(
+                skillName,
+                parseStructuredContent(content),
+                content
+        );
         
         if (outputParams != null && !outputParams.isEmpty()) {
             for (Map<String, Object> param : outputParams) {
                 String paramName = (String) param.get("name");
-                output.put(paramName, content);
+                output.put(paramName, structuredContent);
             }
         } else {
-            output.put("output", content);
+            output.put("output", structuredContent);
+        }
+
+        if (structuredContent instanceof Map<?, ?> structuredMap) {
+            for (Map.Entry<?, ?> entry : structuredMap.entrySet()) {
+                if (entry.getKey() instanceof String key) {
+                    output.putIfAbsent(key, entry.getValue());
+                }
+            }
         }
         
         // 添加token统计
@@ -441,6 +448,41 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
         output.put("tokens", llmResponse.getTotalTokens()); // 保持向后兼容
         
         return output;
+    }
+
+    private Object parseStructuredContent(String content) {
+        if (content == null) {
+            return "";
+        }
+
+        String normalized = stripJsonFence(content.trim());
+        if (!normalized.startsWith("{") || !normalized.endsWith("}")) {
+            return content;
+        }
+
+        try {
+            return JSON.parseObject(normalized, Map.class);
+        } catch (JSONException e) {
+            log.debug("LLM output is not valid JSON object, keep raw content", e);
+            return content;
+        }
+    }
+
+    private String stripJsonFence(String text) {
+        if (!text.startsWith("```")) {
+            return text;
+        }
+
+        int firstLineBreak = text.indexOf('\n');
+        if (firstLineBreak < 0) {
+            return text;
+        }
+
+        String withoutOpeningFence = text.substring(firstLineBreak + 1).trim();
+        if (withoutOpeningFence.endsWith("```")) {
+            return withoutOpeningFence.substring(0, withoutOpeningFence.length() - 3).trim();
+        }
+        return withoutOpeningFence;
     }
     
     /**

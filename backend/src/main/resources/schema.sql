@@ -225,6 +225,7 @@ CREATE TABLE IF NOT EXISTS knowledge_import_task (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识导入任务表';
 
 -- 插入预置节点定义数据
+-- 企业服务台示例资料由 KnowledgeBaseMigrationRunner 从 classpath Markdown 资源写入。
 INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema) VALUES
 ('input', '输入', 'IO', '📥',
  '{"type": "object", "properties": {}}',
@@ -238,8 +239,8 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 
 ('llm', '大模型', 'LLM', '🤖',
  '{"type": "object", "properties": {"input": {"type": "string"}}}',
- '{"type": "object", "properties": {"output": {"type": "string"}, "tokens": {"type": "number"}}}',
- '{"type": "object", "properties": {"provider": {"type": "string"}, "configId": {"type": "number"}, "apiKey": {"type": "string"}, "model": {"type": "string"}, "prompt": {"type": "string"}, "temperature": {"type": "number", "default": 0.7}, "maxTokens": {"type": "number", "default": 1000}}}'),
+ '{"type": "object", "properties": {"output": {"type": "object", "properties": {"answer": {"type": "string"}, "citations": {"type": "array", "items": {"type": "string"}}, "confidence": {"type": "number"}, "resolved": {"type": "boolean"}, "nextAction": {"type": "string"}, "ticketSummary": {"type": "string"}, "escalationReason": {"type": "string"}}}, "answer": {"type": "string"}, "citations": {"type": "array", "items": {"type": "string"}}, "confidence": {"type": "number"}, "resolved": {"type": "boolean"}, "nextAction": {"type": "string"}, "ticketSummary": {"type": "string"}, "escalationReason": {"type": "string"}, "tokens": {"type": "number"}, "inputTokens": {"type": "number"}, "outputTokens": {"type": "number"}, "totalTokens": {"type": "number"}}}',
+ '{"type": "object", "properties": {"provider": {"type": "string"}, "configId": {"type": "number"}, "apiKey": {"type": "string"}, "model": {"type": "string"}, "skillName": {"type": "string", "default": "service-desk-answer"}, "prompt": {"type": "string", "default": "你是企业服务台助手。请结合用户问题、RAG 上下文和引用来源回答，只输出 answer、citations、confidence、resolved、nextAction、ticketSummary、escalationReason 组成的 JSON。"}, "temperature": {"type": "number", "default": 0.2}, "maxTokens": {"type": "number", "default": 1200}}}'),
 
 ('tts', '超拟人音频合成', 'TOOL', '🔊',
  '{"type": "object", "properties": {"text": {"type": "string"}}}',
@@ -253,8 +254,8 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 
 ('rag', '知识库问答', 'KNOWLEDGE', '📚',
  '{"type": "object", "properties": {"question": {"type": "string"}}}',
- '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "retrievedChunks": {"type": "array"}, "retrievedCount": {"type": "number"}}}',
- '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "contextWindow": {"type": "number", "default": 1}, "contextMaxChars": {"type": "number", "default": 1800}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
+ '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "citations": {"type": "array"}, "retrievedChunks": {"type": "array"}, "retrievedCount": {"type": "number"}}}',
+ '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "retrievalOnly": {"type": "boolean", "default": false}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "contextWindow": {"type": "number", "default": 1}, "contextMaxChars": {"type": "number", "default": 1800}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
 ON DUPLICATE KEY UPDATE
     display_name = VALUES(display_name),
     category = VALUES(category),
@@ -269,7 +270,7 @@ ON DUPLICATE KEY UPDATE
 -- 全局 LLM 配置表
 CREATE TABLE IF NOT EXISTS llm_global_config (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '配置主键 ID',
-    provider VARCHAR(50) NOT NULL COMMENT '提供商: openai/deepseek/qwen/step',
+    provider VARCHAR(50) NOT NULL COMMENT '提供商: openai/deepseek/qwen/step/moonshot/kimi_code/mimo/custom',
     config_name VARCHAR(100) NOT NULL COMMENT '配置名称',
     api_url VARCHAR(255) NOT NULL COMMENT 'API地址',
     api_key TEXT NOT NULL COMMENT 'API密钥',

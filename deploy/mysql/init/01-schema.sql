@@ -240,8 +240,8 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
  '{"type":"object","properties":{}}'),
 ('llm', '大模型', 'LLM', '🤖',
  '{"type":"object","properties":{"input":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"tokens":{"type":"number"}}}',
- '{"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"apiKey":{"type":"string"},"model":{"type":"string"},"prompt":{"type":"string"},"temperature":{"type":"number","default":0.7},"maxTokens":{"type":"number","default":1000}}}'),
+ '{"type":"object","properties":{"output":{"type":"object","properties":{"answer":{"type":"string"},"citations":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"},"resolved":{"type":"boolean"},"nextAction":{"type":"string"},"ticketSummary":{"type":"string"},"escalationReason":{"type":"string"}}},"answer":{"type":"string"},"citations":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"},"resolved":{"type":"boolean"},"nextAction":{"type":"string"},"ticketSummary":{"type":"string"},"escalationReason":{"type":"string"},"tokens":{"type":"number"},"inputTokens":{"type":"number"},"outputTokens":{"type":"number"},"totalTokens":{"type":"number"}}}',
+ '{"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"apiKey":{"type":"string"},"model":{"type":"string"},"skillName":{"type":"string","default":"service-desk-answer"},"prompt":{"type":"string","default":"你是企业服务台助手。请结合用户问题、RAG 上下文和引用来源回答，只输出 answer、citations、confidence、resolved、nextAction、ticketSummary、escalationReason 组成的 JSON。"},"temperature":{"type":"number","default":0.2},"maxTokens":{"type":"number","default":1200}}}'),
 ('tts', '超拟人音频合成', 'TOOL', '🔊',
  '{"type":"object","properties":{"text":{"type":"string"}}}',
  '{"type":"object","properties":{"audioUrl":{"type":"string"},"fileName":{"type":"string"},"output":{"type":"string"},"chunks":{"type":"number"}}}',
@@ -252,8 +252,8 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
  '{"type":"object","properties":{"leftType":{"type":"string","default":"reference"},"leftReference":{"type":"string"},"leftValue":{"type":"string"},"operator":{"type":"string","default":"equals"},"rightValue":{"type":"string"},"caseSensitive":{"type":"boolean","default":false}}}'),
 ('rag', '知识库问答', 'KNOWLEDGE', '📚',
  '{"type":"object","properties":{"question":{"type":"string"}}}',
- '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"},"retrievedCount":{"type":"number"}}}',
- '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"contextWindow":{"type":"number","default":1},"contextMaxChars":{"type":"number","default":1800},"configId":{"type":"number"},"prompt":{"type":"string"}}}')
+ '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"citations":{"type":"array"},"retrievedChunks":{"type":"array"},"retrievedCount":{"type":"number"}}}',
+ '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"retrievalOnly":{"type":"boolean","default":false},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"contextWindow":{"type":"number","default":1},"contextMaxChars":{"type":"number","default":1800},"configId":{"type":"number"},"prompt":{"type":"string"}}}')
 ON DUPLICATE KEY UPDATE
     display_name = VALUES(display_name),
     category = VALUES(category),

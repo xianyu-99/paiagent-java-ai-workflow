@@ -2,9 +2,11 @@ import { useState } from 'react';
 import { Alert, Button, Card, Collapse, Drawer, Input, Progress, Tag, Timeline } from 'antd';
 import { CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import AudioPlayer from './AudioPlayer';
+import ServiceDeskResultCard from './ServiceDeskResultCard';
 import { buildBackendUrl } from '../config/api';
 import { ExecutionEvent, WorkflowExecutionNodeData, executeWorkflowStream } from '../api/workflow';
 import { useWorkflowStore } from '../store/workflowStore';
+import { findServiceDeskPayload } from '../utils/serviceDeskOutput';
 
 const { TextArea } = Input;
 
@@ -315,9 +317,7 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
           <div>
             <div className="text-gray-600 text-xs mb-1">输出数据:</div>
             {renderRetrievalTrace(nodeResult.output)}
-            <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-32">
-              {JSON.stringify(nodeResult.output, null, 2)}
-            </pre>
+            <ServiceDeskResultCard value={nodeResult.output} rawTitle="Raw output JSON" rawMaxHeightClassName="max-h-32" />
           </div>
           {nodeResult.error && <Alert message="错误信息" description={nodeResult.error} type="error" showIcon />}
         </div>
@@ -334,7 +334,7 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
           <Card title="输入测试文本" size="small">
             <TextArea
               rows={4}
-              placeholder="请输入测试文本，例如: 人工智能的未来发展"
+              placeholder="请输入测试文本，例如：我连不上公司 VPN，提示证书过期，怎么办？"
               value={inputData}
               onChange={(e) => setInputData(e.target.value)}
               disabled={executing}
@@ -450,15 +450,22 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
                   }
                 }
 
+                const serviceDeskPayload = findServiceDeskPayload(outputData);
+
+                if (serviceDeskPayload) {
+                  return (
+                    <div className="space-y-3">
+                      <ServiceDeskResultCard value={outputData} rawTitle="Raw final output JSON" />
+                      {audioUrl && <AudioPlayer audioUrl={audioUrl} fileName={fileName} />}
+                    </div>
+                  );
+                }
+
                 if (audioUrl) {
                   return <AudioPlayer audioUrl={audioUrl} fileName={fileName} />;
                 }
 
-                return (
-                  <pre className="bg-gray-50 p-2 rounded text-xs overflow-auto max-h-48">
-                    {JSON.stringify(executionResult.outputData, null, 2)}
-                  </pre>
-                );
+                return <ServiceDeskResultCard value={executionResult.outputData} rawTitle="Raw final output JSON" />;
               })()}
             </Card>
           </div>

@@ -2,6 +2,7 @@ package com.paiagent.engine.executor.impl;
 
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.model.WorkflowNode;
+import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -56,7 +57,7 @@ public class ConditionNodeExecutor implements NodeExecutor {
 
         String reference = getString(data, "leftReference", "");
         if (!reference.isBlank()) {
-            Object value = resolveReference(reference, input);
+            Object value = WorkflowReferenceResolver.resolve(reference, input);
             if (value != null) {
                 return value;
             }
@@ -70,29 +71,6 @@ public class ConditionNodeExecutor implements NodeExecutor {
             return input.get("output");
         }
         return input.get("input");
-    }
-
-    private Object resolveReference(String reference, Map<String, Object> input) {
-        if (!reference.contains(".")) {
-            return input.get(reference);
-        }
-
-        String[] parts = reference.split("\\.");
-        String nodeId = parts[0];
-        String field = parts[parts.length - 1];
-
-        Object nodeOutputsObject = input.get("__nodeOutputs__");
-        if (nodeOutputsObject instanceof Map<?, ?> nodeOutputs) {
-            Object nodeOutputObject = nodeOutputs.get(nodeId);
-            if (nodeOutputObject instanceof Map<?, ?> nodeOutput) {
-                return nodeOutput.get(field);
-            }
-        }
-
-        if ("user_input".equals(field)) {
-            return input.get("input");
-        }
-        return input.get(field);
     }
 
     private boolean evaluate(Object leftValue, String operator, String rightValue, boolean caseSensitive) {

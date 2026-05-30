@@ -15,14 +15,13 @@ import {
 import { SettingOutlined, PlusOutlined, EditOutlined, DeleteOutlined, StarOutlined, StarFilled } from '@ant-design/icons';
 import { useLLMConfigStore } from '../store/llmConfigStore';
 import { LLMGlobalConfig, LLMConfigRequest } from '../api/llmConfig';
-import { getProviderLabel, normalizeProviderKey } from '../utils/provider';
-
-const PROVIDERS = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'qwen', label: '通义千问' },
-  { value: 'step', label: '阶跃星辰' }
-];
+import {
+  getProviderDefaultBaseUrl,
+  getProviderLabel,
+  getProviderModelPlaceholder,
+  getSupportedProviderOptions,
+  normalizeProviderKey
+} from '../utils/provider';
 
 interface LLMConfigModalProps {
   visible?: boolean;
@@ -34,6 +33,7 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
   const [formVisible, setFormVisible] = useState(false);
   const [editingConfig, setEditingConfig] = useState<LLMGlobalConfig | null>(null);
   const [form] = Form.useForm();
+  const selectedProvider = Form.useWatch('provider', form);
 
   const {
     configs,
@@ -48,7 +48,7 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
 
   const providerOptions = Array.from(
     new Map(
-      [...PROVIDERS, ...configs.map((config) => ({
+      [...getSupportedProviderOptions(), ...configs.map((config) => ({
         value: normalizeProviderKey(config.provider),
         label: getProviderLabel(config.provider)
       }))]
@@ -112,6 +112,13 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
     setFormVisible(false);
     setEditingConfig(null);
     form.resetFields();
+  };
+
+  const applyProviderDefaults = (providerValue?: string) => {
+    const defaultBaseUrl = getProviderDefaultBaseUrl(providerValue);
+    if (defaultBaseUrl && !form.getFieldValue('apiUrl')) {
+      form.setFieldValue('apiUrl', defaultBaseUrl);
+    }
   };
 
   const handleSubmit = async () => {
@@ -315,12 +322,14 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
                       : Promise.reject(new Error('请输入或选择提供商'))
                 }
               ]}
-              extra="支持直接手填，也可以从已有供应商中选择。手填时建议与节点类型保持一致，例如 openai、deepseek、qwen、step。"
+              extra="支持直接手填，也可以从已有供应商中选择。OpenAI 兼容服务只需填写供应商、API 地址、API Key 和模型名，例如 openai、deepseek、qwen、moonshot、kimi_code、mimo。"
             >
               <AutoComplete
                 placeholder="请输入或选择提供商"
                 options={providerOptions}
                 disabled={!!editingConfig}
+                onSelect={applyProviderDefaults}
+                onBlur={() => applyProviderDefaults(form.getFieldValue('provider'))}
                 filterOption={(inputValue, option) =>
                   (option?.value ?? '').toLowerCase().includes(inputValue.toLowerCase()) ||
                   String(option?.label ?? '').toLowerCase().includes(inputValue.toLowerCase())
@@ -341,9 +350,9 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
               name="apiUrl"
               label="API 地址"
               rules={[{ required: true, message: '请输入 API 地址' }]}
-              extra="填写接口根地址，不要追加具体接口路径。"
+              extra="填写 OpenAI 兼容接口根地址；这里会自动兼容去掉 /v1 或 /v1/chat/completions。Kimi Code 默认使用 https://api.kimi.com/coding，Kimi / Moonshot 默认使用 https://api.moonshot.cn。"
             >
-              <Input placeholder="例如: https://api.openai.com" />
+              <Input placeholder={getProviderDefaultBaseUrl(selectedProvider) || '例如: https://api.openai.com'} />
             </Form.Item>
 
             <Form.Item
@@ -360,7 +369,7 @@ const LLMConfigModal: React.FC<LLMConfigModalProps> = ({ visible, onClose }) => 
               label="默认模型"
               rules={[{ required: true, message: '请输入默认模型' }]}
             >
-              <Input placeholder="例如: gpt-3.5-turbo, deepseek-chat, claude-3-5-sonnet-20241022" />
+              <Input placeholder={getProviderModelPlaceholder(selectedProvider)} />
             </Form.Item>
 
             <Form.Item

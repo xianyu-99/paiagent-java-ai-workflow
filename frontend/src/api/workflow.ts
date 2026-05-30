@@ -67,7 +67,7 @@ export interface ExecutionResponse {
   executionId?: number;
   status: string;
   nodeResults?: ExecutionNodeResult[];
-  outputData?: string;
+  outputData?: unknown;
   duration?: number;
   errorMessage?: string;
   errorLog?: unknown;

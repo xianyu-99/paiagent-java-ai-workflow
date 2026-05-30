@@ -113,12 +113,12 @@ class LangGraphWorkflowEngineTest {
         ExecutionResponse trueResponse = langGraphEngine.execute(workflow, "please go true branch");
         assertNotNull(trueResponse);
         assertEquals("SUCCESS", trueResponse.getStatus());
-        assertTrue(trueResponse.getOutputData().contains("TRUE_BRANCH"));
+        assertTrue(String.valueOf(trueResponse.getOutputData()).contains("TRUE_BRANCH"));
 
         ExecutionResponse falseResponse = langGraphEngine.execute(workflow, "stop here");
         assertNotNull(falseResponse);
         assertEquals("SUCCESS", falseResponse.getStatus());
-        assertTrue(falseResponse.getOutputData().contains("FALSE_BRANCH"));
+        assertTrue(String.valueOf(falseResponse.getOutputData()).contains("FALSE_BRANCH"));
     }
 
     @Test
@@ -129,7 +129,7 @@ class LangGraphWorkflowEngineTest {
 
         assertNotNull(response);
         assertEquals("SUCCESS", response.getStatus());
-        assertTrue(response.getOutputData().contains("LOOP_DONE"));
+        assertTrue(String.valueOf(response.getOutputData()).contains("LOOP_DONE"));
     }
     
     /**

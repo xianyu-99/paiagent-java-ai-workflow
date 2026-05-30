@@ -4,7 +4,6 @@ import com.alibaba.fastjson2.JSON;
 import com.paiagent.config.RagEmbeddingProperties;
 import com.paiagent.service.embedding.DashScopeEmbeddingProvider;
 import com.paiagent.service.embedding.EmbeddingProvider;
-import com.paiagent.service.embedding.LocalHashEmbeddingProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -18,10 +17,6 @@ import java.util.Locale;
 public class TextEmbeddingService {
 
     private final EmbeddingProvider embeddingProvider;
-
-    public TextEmbeddingService() {
-        this.embeddingProvider = new LocalHashEmbeddingProvider();
-    }
 
     @Autowired
     public TextEmbeddingService(RagEmbeddingProperties properties) {
@@ -74,11 +69,9 @@ public class TextEmbeddingService {
             return false;
         }
 
-        // Legacy chunks created before metadata columns are compatible only with local Hash Embedding.
         return StringUtils.hasText(chunkProvider)
                 || StringUtils.hasText(chunkModel)
-                || chunkDimensions != null
-                || "local".equalsIgnoreCase(provider());
+                || chunkDimensions != null;
     }
 
     public String sha256(String text) {
@@ -96,13 +89,14 @@ public class TextEmbeddingService {
     }
 
     private EmbeddingProvider createProvider(RagEmbeddingProperties properties) {
-        String provider = properties == null ? "local" : properties.getProvider();
-        if (!StringUtils.hasText(provider)) {
-            return new LocalHashEmbeddingProvider();
+        if (properties == null || !StringUtils.hasText(properties.getProvider())) {
+            throw new IllegalStateException(
+                    "RAG embedding provider is not configured. " +
+                    "Set 'paiagent.rag.embedding.provider' (e.g., 'dashscope') and the corresponding API key.");
         }
-        return switch (provider.toLowerCase(Locale.ROOT)) {
+        String provider = properties.getProvider().toLowerCase(Locale.ROOT);
+        return switch (provider) {
             case "dashscope", "aliyun" -> new DashScopeEmbeddingProvider(properties);
-            case "local", "hash", "local-hash" -> new LocalHashEmbeddingProvider();
             default -> throw new IllegalArgumentException("Unsupported RAG embedding provider: " + provider);
         };
     }

@@ -12,7 +12,7 @@ public class ExecutionResponse {
     private Long executionId;
     private String status;
     private List<NodeResult> nodeResults;
-    private String outputData;
+    private Object outputData;
     private Integer duration;
     private String errorMessage;
     private String errorLog;

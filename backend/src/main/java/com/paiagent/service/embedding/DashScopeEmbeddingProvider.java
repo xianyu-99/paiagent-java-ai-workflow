@@ -1,6 +1,7 @@
 package com.paiagent.service.embedding;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.paiagent.common.VectorMath;
 import com.paiagent.config.RagEmbeddingProperties;
 import lombok.Data;
 import org.springframework.http.MediaType;
@@ -62,7 +63,7 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
 
     @Override
     public double cosine(List<Double> left, List<Double> right) {
-        return new LocalHashEmbeddingProvider().cosine(left, right);
+        return VectorMath.cosine(left, right);
     }
 
     @Override

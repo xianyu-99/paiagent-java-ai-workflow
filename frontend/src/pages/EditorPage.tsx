@@ -40,14 +40,33 @@ import {
 } from '../api/knowledge';
 import { getRefreshToken } from '../utils/auth';
 import {
+  getProviderDefaultBaseUrl,
   getProviderFromNodeType,
   getProviderLabel,
+  getProviderModelPlaceholder,
   getSupportedProviderOptions,
   isLlmNodeType,
   normalizeProviderKey,
+  SUPPORTED_LLM_PROVIDERS,
 } from '../utils/provider';
-import { createDefaultWorkflowNodes, normalizeWorkflowNodes, serializeWorkflowNodes } from '../utils/workflowNode';
+import {
+  bindDefaultEnterpriseKnowledgeBase,
+  createDefaultWorkflowEdges,
+  createDefaultWorkflowNodes,
+  ENTERPRISE_SERVICE_DESK_KNOWLEDGE_BASE_NAME,
+  normalizeWorkflowNodes,
+  serializeWorkflowNodes,
+} from '../utils/workflowNode';
 import { useNavigate, useParams } from 'react-router-dom';
+
+const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
+  openai: 'gpt-4o-mini',
+  deepseek: 'deepseek-chat',
+  qwen: 'qwen-plus',
+  moonshot: 'kimi-k2.6',
+  kimi_code: 'kimi-for-coding',
+  mimo: 'mimo-v2.5-pro',
+};
 
 interface OutputParam {
   name: string;
@@ -93,6 +112,7 @@ interface ConditionConfig {
 interface RagConfig {
   knowledgeBaseId?: number;
   configId?: number;
+  retrievalOnly: boolean;
   questionReference?: string;
   topK: number;
   minScore: number;
@@ -117,7 +137,7 @@ const EditorPage = () => {
   const { id } = useParams<{ id: string }>();
   const { username, role, clearAuth } = useAuthStore();
   const { nodes, edges, currentWorkflowId, setCurrentWorkflowId, selectedNode, setNodes, setEdges } = useWorkflowStore();
-  const [workflowName, setWorkflowName] = useState('未命名工作流');
+  const [workflowName, setWorkflowName] = useState('企业服务台助手');
   const [engineType, setEngineType] = useState('dag');
   const [saving, setSaving] = useState(false);
   const [debugDrawerOpen, setDebugDrawerOpen] = useState(false);
@@ -181,7 +201,7 @@ const EditorPage = () => {
   const [conditionConfig, setConditionConfig] = useState<ConditionConfig>({
     leftType: 'reference',
     leftValue: '',
-    leftReference: 'input-default.user_input',
+    leftReference: 'input-default.input',
     operator: 'contains',
     rightValue: '',
     caseSensitive: false
@@ -189,7 +209,8 @@ const EditorPage = () => {
   const [ragConfig, setRagConfig] = useState<RagConfig>({
     knowledgeBaseId: undefined,
     configId: undefined,
-    questionReference: 'input-default.user_input',
+    retrievalOnly: false,
+    questionReference: 'input-default.input',
     topK: 3,
     minScore: 0,
     contextWindow: 1,
@@ -219,6 +240,22 @@ const EditorPage = () => {
     }
 
     return getProviderFromNodeType(String(node.data?.type || ''));
+  };
+
+  const shouldReplaceProviderDefault = (
+    currentValue: string,
+    previousProvider: string,
+    defaultResolver: (provider: string) => string
+  ) => {
+    if (!currentValue) {
+      return true;
+    }
+
+    if (Boolean(previousProvider) && currentValue === defaultResolver(previousProvider)) {
+      return true;
+    }
+
+    return SUPPORTED_LLM_PROVIDERS.some((provider) => currentValue === defaultResolver(provider));
   };
 
   // 处理节点拖拽开始
@@ -285,7 +322,7 @@ const EditorPage = () => {
       setConditionConfig({
         leftType: (node.data?.leftType as 'input' | 'reference') || 'reference',
         leftValue: (node.data?.leftValue as string) || '',
-        leftReference: (node.data?.leftReference as string) || 'input-default.user_input',
+        leftReference: (node.data?.leftReference as string) || 'input-default.input',
         operator: (node.data?.operator as string) || 'contains',
         rightValue: (node.data?.rightValue as string) || '',
         caseSensitive: Boolean(node.data?.caseSensitive)
@@ -296,7 +333,8 @@ const EditorPage = () => {
       setRagConfig({
         knowledgeBaseId: (node.data?.knowledgeBaseId as number) || undefined,
         configId: (node.data?.configId as number) || undefined,
-        questionReference: questionParam?.referenceNode || 'input-default.user_input',
+        retrievalOnly: Boolean(node.data?.retrievalOnly),
+        questionReference: questionParam?.referenceNode || 'input-default.input',
         topK: (node.data?.topK as number) || 3,
         minScore: (node.data?.minScore as number) || 0,
         contextWindow: (node.data?.contextWindow as number) ?? 1,
@@ -325,6 +363,20 @@ const EditorPage = () => {
   useEffect(() => {
     refreshKnowledgeBases();
   }, [refreshKnowledgeBases]);
+
+  useEffect(() => {
+    if (id || currentWorkflowId) {
+      return;
+    }
+
+    const enterpriseKnowledgeBaseId = knowledgeBases.find(
+      (knowledgeBase) => knowledgeBase.name === ENTERPRISE_SERVICE_DESK_KNOWLEDGE_BASE_NAME
+    )?.id;
+    const boundNodes = bindDefaultEnterpriseKnowledgeBase(nodes, enterpriseKnowledgeBaseId);
+    if (boundNodes !== nodes) {
+      setNodes(boundNodes);
+    }
+  }, [currentWorkflowId, id, knowledgeBases, nodes, setNodes]);
 
   const refreshPublishStatus = useCallback(async (workflowId?: number | null) => {
     if (!workflowId) {
@@ -753,13 +805,13 @@ const EditorPage = () => {
       case 'step':
       case 'zhipu':
       case 'ai_ping':
-        return ['output', 'tokens'];
+        return ['output', 'answer', 'citations', 'confidence', 'resolved', 'nextAction', 'ticketSummary', 'escalationReason', 'tokens'];
       case 'tts':
         return ['audioUrl', 'fileName', 'output'];
       case 'condition':
         return ['conditionResult', 'selectedBranch', 'output'];
       case 'rag':
-        return ['output', 'context', 'retrievedCount'];
+        return ['output', 'context', 'citations', 'retrievedCount'];
       default:
         return ['output'];
     }
@@ -901,11 +953,14 @@ const EditorPage = () => {
   const handleCreateNew = () => {
     hasLoadedRef.current = null;
     setCurrentWorkflowId(null);
-    setWorkflowName('未命名工作流');
+    setWorkflowName('企业服务台助手');
+    const enterpriseKnowledgeBaseId = knowledgeBases.find(
+      (knowledgeBase) => knowledgeBase.name === ENTERPRISE_SERVICE_DESK_KNOWLEDGE_BASE_NAME
+    )?.id;
     
-    // 创建默认的输入和输出节点(上下排列)
-    setNodes(createDefaultWorkflowNodes());
-    setEdges([]);
+    // 创建企业服务台默认模板
+    setNodes(createDefaultWorkflowNodes(enterpriseKnowledgeBaseId));
+    setEdges(createDefaultWorkflowEdges());
     navigate('/editor');
     message.info('已创建新工作流');
   };
@@ -1128,7 +1183,7 @@ const EditorPage = () => {
       message.warning('请选择知识库');
       return;
     }
-    if (!ragConfig.configId) {
+    if (!ragConfig.retrievalOnly && !ragConfig.configId) {
       message.warning('请选择用于回答的全局 LLM 配置');
       return;
     }
@@ -1141,6 +1196,7 @@ const EditorPage = () => {
       ...selectedNode.data,
       knowledgeBaseId: ragConfig.knowledgeBaseId,
       configId: ragConfig.configId,
+      retrievalOnly: ragConfig.retrievalOnly,
       topK: ragConfig.topK,
       minScore: ragConfig.minScore,
       contextWindow: ragConfig.contextWindow,
@@ -1814,7 +1870,6 @@ const EditorPage = () => {
                     {/* 全局配置选择 */}
                     <Form.Item
                       label="全局配置"
-                      required={!llmConfig.configId && !llmConfig.apiUrl}
                     >
                       <Select
                         value={llmConfig.configId}
@@ -1855,9 +1910,27 @@ const EditorPage = () => {
                           ))}
                       </Select>
                       <div className="text-xs text-gray-500 mt-1">
-                        💡 选择全局配置后无需填写下方 API 信息
+                        💡 可选。选择全局配置后无需填写下方 API 信息；不选择时改用手动配置。
                       </div>
                     </Form.Item>
+
+                    {llmConfig.configId && (
+                      <Button
+                        size="small"
+                        className="mb-4"
+                        onClick={() => setLlmConfig({
+                          ...llmConfig,
+                          provider: isGenericLlmNode ? '' : selectedNodeProvider,
+                          configId: undefined,
+                          apiUrl: '',
+                          apiKey: '',
+                          model: '',
+                          temperature: 0.7
+                        })}
+                      >
+                        改为手动配置
+                      </Button>
+                    )}
 
                     {/* API 配置（未选择全局配置时显示） */}
                     {!llmConfig.configId && (
@@ -1868,7 +1941,35 @@ const EditorPage = () => {
                               value={llmConfig.provider || undefined}
                               placeholder="选择这条节点配置要使用的供应商"
                               options={providerOptions}
-                              onChange={(value) => setLlmConfig({ ...llmConfig, provider: value })}
+                              allowClear
+                              onChange={(value) => {
+                                if (!value) {
+                                  setLlmConfig({
+                                    ...llmConfig,
+                                    provider: '',
+                                    apiUrl: '',
+                                    model: ''
+                                  });
+                                  return;
+                                }
+                                const previousProvider = llmConfig.provider;
+                                const defaultBaseUrl = getProviderDefaultBaseUrl(value);
+                                const defaultModel = DEFAULT_PROVIDER_MODELS[value] || '';
+                                setLlmConfig({
+                                  ...llmConfig,
+                                  provider: value,
+                                  apiUrl: shouldReplaceProviderDefault(
+                                    llmConfig.apiUrl,
+                                    previousProvider,
+                                    getProviderDefaultBaseUrl
+                                  ) ? defaultBaseUrl : llmConfig.apiUrl,
+                                  model: shouldReplaceProviderDefault(
+                                    llmConfig.model,
+                                    previousProvider,
+                                    (provider) => DEFAULT_PROVIDER_MODELS[provider] || ''
+                                  ) ? defaultModel : llmConfig.model
+                                });
+                              }}
                             />
                           </Form.Item>
                         )}
@@ -1877,7 +1978,7 @@ const EditorPage = () => {
                         </div>
                         <Form.Item label="API 地址" required>
                           <Input
-                            placeholder="例如: https://dashscope.aliyuncs.com/compatible-mode"
+                            placeholder={getProviderDefaultBaseUrl(llmConfig.provider) || '例如: https://dashscope.aliyuncs.com/compatible-mode'}
                             value={llmConfig.apiUrl}
                             onChange={(e) => setLlmConfig({...llmConfig, apiUrl: e.target.value})}
                           />
@@ -1894,7 +1995,7 @@ const EditorPage = () => {
                         </Form.Item>
                         <Form.Item label="模型名称" required>
                           <Input
-                            placeholder="例如: deepseek-chat, claude-3-5-sonnet-20241022"
+                            placeholder={getProviderModelPlaceholder(llmConfig.provider)}
                             value={llmConfig.model}
                             onChange={(e) => setLlmConfig({...llmConfig, model: e.target.value})}
                           />
@@ -2259,7 +2360,7 @@ const EditorPage = () => {
                 {selectedNode.data?.type === 'rag' && (
                   <Form layout="vertical" className="mt-4">
                     <div className="mb-4 p-3 bg-blue-50 rounded text-sm text-blue-700">
-                      RAG 节点会先检索知识库片段，再把上下文和问题交给 LLM 生成答案。
+                      RAG 节点可只检索企业知识库片段，也可继续调用 LLM 生成答案。
                     </div>
 
                     <Form.Item label="知识库" required>
@@ -2391,11 +2492,21 @@ const EditorPage = () => {
                       </Select>
                     </Form.Item>
 
-                    <Form.Item label="LLM 全局配置" required>
+                    <Form.Item>
+                      <Checkbox
+                        checked={ragConfig.retrievalOnly}
+                        onChange={(e) => setRagConfig({ ...ragConfig, retrievalOnly: e.target.checked })}
+                      >
+                        仅检索上下文，不在 RAG 节点内调用 LLM
+                      </Checkbox>
+                    </Form.Item>
+
+                    <Form.Item label="LLM 全局配置" required={!ragConfig.retrievalOnly}>
                       <Select
                         placeholder="选择用于生成答案的模型配置"
                         value={ragConfig.configId}
                         onChange={(value) => setRagConfig({ ...ragConfig, configId: value })}
+                        disabled={ragConfig.retrievalOnly}
                         style={{ width: '100%' }}
                       >
                         {llmGlobalConfigs.map(config => (
@@ -2456,6 +2567,7 @@ const EditorPage = () => {
                         placeholder="留空使用默认 RAG 提示词；可使用 {{context}} 和 {{question}}"
                         value={ragConfig.prompt}
                         onChange={(e) => setRagConfig({ ...ragConfig, prompt: e.target.value })}
+                        disabled={ragConfig.retrievalOnly}
                       />
                     </Form.Item>
 

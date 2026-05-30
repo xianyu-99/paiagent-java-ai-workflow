@@ -40,7 +40,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     }
 
     public WorkflowResponse updateWorkflow(Long id, WorkflowRequest request, Long userId, boolean admin) {
-        Workflow workflow = getAccessibleWorkflow(id, userId, admin);
+        Workflow workflow = getWritableWorkflow(id, userId, admin);
         String flowData = apiKeyCryptoService.preserveMissingApiKeysInJson(
                 request.getFlowData(),
                 workflow.getFlowData()
@@ -57,7 +57,7 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     }
 
     public void deleteWorkflow(Long id, Long userId, boolean admin) {
-        Workflow workflow = getAccessibleWorkflow(id, userId, admin);
+        Workflow workflow = getWritableWorkflow(id, userId, admin);
         this.removeById(workflow.getId());
     }
 
@@ -68,7 +68,10 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
     public List<WorkflowResponse> listWorkflows(Long userId, boolean admin) {
         LambdaQueryWrapper<Workflow> wrapper = new LambdaQueryWrapper<>();
         if (!admin) {
-            wrapper.eq(Workflow::getOwnerId, userId);
+            wrapper.and(owner -> owner
+                    .eq(Workflow::getOwnerId, userId)
+                    .or()
+                    .isNull(Workflow::getOwnerId));
         }
         wrapper.orderByDesc(Workflow::getUpdatedAt);
 
@@ -79,10 +82,10 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     public Workflow getAccessibleWorkflow(Long id, Long userId, boolean admin) {
         Workflow workflow = this.getById(id);
-        if (workflow == null) {
+        if (workflow == null || isDeleted(workflow)) {
             throw new RuntimeException("工作流不存在");
         }
-        if (!admin && (workflow.getOwnerId() == null || !workflow.getOwnerId().equals(userId))) {
+        if (!admin && workflow.getOwnerId() != null && !workflow.getOwnerId().equals(userId)) {
             throw new ForbiddenException("无权访问该工作流");
         }
         return workflow;
@@ -96,11 +99,23 @@ public class WorkflowService extends ServiceImpl<WorkflowMapper, Workflow> {
 
     public Workflow getWorkflowForPublishedExecution(Long id) {
         Workflow workflow = this.getById(id);
-        if (workflow == null) {
+        if (workflow == null || isDeleted(workflow)) {
             throw new RuntimeException("工作流不存在或已删除");
         }
         workflow.setFlowData(apiKeyCryptoService.decryptApiKeysInJson(workflow.getFlowData()));
         return workflow;
+    }
+
+    private Workflow getWritableWorkflow(Long id, Long userId, boolean admin) {
+        Workflow workflow = getAccessibleWorkflow(id, userId, admin);
+        if (!admin && workflow.getOwnerId() == null) {
+            throw new ForbiddenException("无权修改该工作流");
+        }
+        return workflow;
+    }
+
+    private boolean isDeleted(Workflow workflow) {
+        return Integer.valueOf(1).equals(workflow.getDeleted());
     }
 
     private WorkflowResponse toResponse(Workflow workflow) {

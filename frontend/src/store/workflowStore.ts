@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { Node, Edge } from '@xyflow/react';
-import { createDefaultWorkflowNodes, normalizeWorkflowNodes } from '../utils/workflowNode';
+import { createDefaultWorkflowEdges, createDefaultWorkflowNodes, normalizeWorkflowNodes } from '../utils/workflowNode';
 
 interface WorkflowState {
   nodes: Node[];
@@ -18,10 +18,11 @@ interface WorkflowState {
 }
 
 const defaultNodes: Node[] = createDefaultWorkflowNodes();
+const defaultEdges: Edge[] = createDefaultWorkflowEdges();
 
 export const useWorkflowStore = create<WorkflowState>((set) => ({
   nodes: defaultNodes,
-  edges: [],
+  edges: defaultEdges,
   selectedNode: null,
   currentWorkflowId: null,
   
@@ -50,7 +51,7 @@ export const useWorkflowStore = create<WorkflowState>((set) => ({
   
   clear: () => set({
     nodes: createDefaultWorkflowNodes(),
-    edges: [],
+    edges: createDefaultWorkflowEdges(),
     selectedNode: null,
     currentWorkflowId: null
   })

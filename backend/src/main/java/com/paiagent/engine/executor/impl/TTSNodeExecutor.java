@@ -46,6 +46,7 @@ public class TTSNodeExecutor implements NodeExecutor {
     private static final String DEFAULT_MIMO_TTS_MODEL = "mimo-v2-tts";
     private static final String DEFAULT_MIMO_VOICE = "mimo_default";
     private static final String DEFAULT_AUDIO_FORMAT = "wav";
+    private static final int WAV_MIN_HEADER_LENGTH = 12;
     
     @Autowired
     private MinioService minioService;
@@ -77,7 +78,7 @@ public class TTSNodeExecutor implements NodeExecutor {
     
     @Override
     public Map<String, Object> execute(WorkflowNode node, Map<String, Object> input, Consumer<ExecutionEvent> progressCallback) throws Exception {
-        String text = extractInputText(node, input);
+        String text = normalizeTtsInputText(extractInputText(node, input));
         if (!StringUtils.hasText(text)) {
             throw new IllegalArgumentException("输入文本不能为空");
         }
@@ -477,19 +478,22 @@ public class TTSNodeExecutor implements NodeExecutor {
         List<Map<String, Object>> inputParams = (List<Map<String, Object>>) data.get("inputParams");
         
         if (inputParams != null && !inputParams.isEmpty()) {
+            String firstResolvedText = null;
             for (Map<String, Object> param : inputParams) {
                 String paramName = (String) param.get("name");
-                if ("text".equals(paramName)) {
-                    String type = (String) param.get("type");
-                    if ("input".equals(type)) {
-                        return stringValue(param.get("value"));
-                    } else if ("reference".equals(type)) {
-                        Object value = WorkflowReferenceResolver.resolve(stringValue(param.get("referenceNode")), input);
-                        if (value != null) {
-                            return String.valueOf(value);
-                        }
-                    }
+                String resolved = resolveTtsInputParam(param, input);
+                if (!StringUtils.hasText(resolved)) {
+                    continue;
                 }
+                if ("text".equals(paramName)) {
+                    return resolved;
+                }
+                if (firstResolvedText == null) {
+                    firstResolvedText = resolved;
+                }
+            }
+            if (StringUtils.hasText(firstResolvedText)) {
+                return firstResolvedText;
             }
         }
         
@@ -504,6 +508,58 @@ public class TTSNodeExecutor implements NodeExecutor {
         }
         
         return stringValue(input.get("text"));
+    }
+
+    private String resolveTtsInputParam(Map<String, Object> param, Map<String, Object> input) {
+        String type = stringValue(param.get("type"));
+        if ("input".equals(type)) {
+            return stringValue(param.get("value"));
+        }
+        if ("reference".equals(type)) {
+            Object value = WorkflowReferenceResolver.resolve(stringValue(param.get("referenceNode")), input);
+            return value == null ? null : String.valueOf(value);
+        }
+        return null;
+    }
+
+    private String normalizeTtsInputText(String text) {
+        String normalized = extractOutputFromJsonObject(text);
+        if (!StringUtils.hasText(normalized)) {
+            return normalized;
+        }
+
+        normalized = normalized.trim()
+                .replace("\r\n", "\n")
+                .replace('\r', '\n');
+        normalized = normalized.replaceAll("\\s*\\[(停顿|笑声|强调)\\]\\s*", "\n");
+        normalized = normalized.replaceAll("(?m)^\\s*(?:主持人\\s*)?[A-Za-z]\\s*[:：]\\s*", "");
+        normalized = normalized.replaceAll("([。！？!?；;])\\s*(?:主持人\\s*)?[A-Za-z]\\s*[:：]\\s*", "$1\n");
+        normalized = normalized.replaceAll("[\\t\\x0B\\f ]+", " ");
+        normalized = normalized.replaceAll(" *\\n+ *", "\n");
+        normalized = normalized.replaceAll("\\n{3,}", "\n\n");
+        return normalized.trim();
+    }
+
+    private String extractOutputFromJsonObject(String text) {
+        if (!StringUtils.hasText(text)) {
+            return text;
+        }
+        String trimmed = text.trim();
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+            return text;
+        }
+        try {
+            Object parsed = JSON.parse(trimmed);
+            if (parsed instanceof JSONObject object) {
+                Object output = object.get("output");
+                if (output instanceof String outputText && StringUtils.hasText(outputText)) {
+                    return outputText;
+                }
+            }
+        } catch (Exception ignored) {
+            return text;
+        }
+        return text;
     }
 
     private String stringValue(Object value) {
@@ -667,61 +723,94 @@ public class TTSNodeExecutor implements NodeExecutor {
         }
         
         byte[] firstChunk = audioChunks.get(0);
-        if (firstChunk.length < 44) {
-            throw new IllegalArgumentException("无效的 WAV 文件格式");
-        }
+        WavLayout firstLayout = parseWavLayout(firstChunk);
         
         ByteArrayOutputStream mergedStream = new ByteArrayOutputStream();
         
-        byte[] header = Arrays.copyOf(firstChunk, 44);
+        byte[] header = Arrays.copyOf(firstChunk, firstLayout.dataOffset());
         mergedStream.write(header);
         
         for (byte[] chunk : audioChunks) {
-            if (chunk.length > 44) {
-                mergedStream.write(chunk, 44, chunk.length - 44);
-            }
+            WavLayout layout = parseWavLayout(chunk);
+            mergedStream.write(chunk, layout.dataOffset(), layout.dataSize());
         }
         
         byte[] mergedData = mergedStream.toByteArray();
         
-        int dataSize = mergedData.length - 44;
+        int dataSize = mergedData.length - firstLayout.dataOffset();
         int fileSize = mergedData.length - 8;
         
-        mergedData[4] = (byte) (fileSize & 0xFF);
-        mergedData[5] = (byte) ((fileSize >> 8) & 0xFF);
-        mergedData[6] = (byte) ((fileSize >> 16) & 0xFF);
-        mergedData[7] = (byte) ((fileSize >> 24) & 0xFF);
+        writeLittleEndianInt(mergedData, 4, fileSize);
+        writeLittleEndianInt(mergedData, firstLayout.dataSizeOffset(), dataSize);
         
-        mergedData[40] = (byte) (dataSize & 0xFF);
-        mergedData[41] = (byte) ((dataSize >> 8) & 0xFF);
-        mergedData[42] = (byte) ((dataSize >> 16) & 0xFF);
-        mergedData[43] = (byte) ((dataSize >> 24) & 0xFF);
-        
-        return normalizeWavHeader(mergedData);
+        return mergedData;
     }
 
     /**
      * 修正 WAV 头里的长度字段，避免上游返回异常头信息导致播放器时长识别错误。
      */
     private byte[] normalizeWavHeader(byte[] wavData) {
-        if (wavData == null || wavData.length < 44) {
+        WavLayout layout = parseWavLayout(wavData);
+        byte[] normalized = Arrays.copyOf(wavData, wavData.length);
+        int dataSize = normalized.length - layout.dataOffset();
+        int fileSize = normalized.length - 8;
+
+        writeLittleEndianInt(normalized, 4, fileSize);
+        writeLittleEndianInt(normalized, layout.dataSizeOffset(), dataSize);
+
+        return normalized;
+    }
+
+    private WavLayout parseWavLayout(byte[] wavData) {
+        if (wavData == null || wavData.length < WAV_MIN_HEADER_LENGTH
+                || !matchesAscii(wavData, 0, "RIFF")
+                || !matchesAscii(wavData, 8, "WAVE")) {
             throw new IllegalArgumentException("无效的 WAV 文件格式");
         }
 
-        byte[] normalized = Arrays.copyOf(wavData, wavData.length);
-        int dataSize = normalized.length - 44;
-        int fileSize = normalized.length - 8;
+        int offset = WAV_MIN_HEADER_LENGTH;
+        while (offset + 8 <= wavData.length) {
+            String chunkId = new String(wavData, offset, 4, StandardCharsets.US_ASCII);
+            int chunkSize = readLittleEndianInt(wavData, offset + 4);
+            int dataOffset = offset + 8;
+            if (chunkSize < 0 || dataOffset + chunkSize > wavData.length) {
+                throw new IllegalArgumentException("无效的 WAV chunk 大小: " + chunkId);
+            }
+            if ("data".equals(chunkId)) {
+                return new WavLayout(dataOffset, chunkSize, offset + 4);
+            }
+            offset = dataOffset + chunkSize + (chunkSize % 2);
+        }
 
-        normalized[4] = (byte) (fileSize & 0xFF);
-        normalized[5] = (byte) ((fileSize >> 8) & 0xFF);
-        normalized[6] = (byte) ((fileSize >> 16) & 0xFF);
-        normalized[7] = (byte) ((fileSize >> 24) & 0xFF);
+        throw new IllegalArgumentException("WAV 文件缺少 data chunk");
+    }
 
-        normalized[40] = (byte) (dataSize & 0xFF);
-        normalized[41] = (byte) ((dataSize >> 8) & 0xFF);
-        normalized[42] = (byte) ((dataSize >> 16) & 0xFF);
-        normalized[43] = (byte) ((dataSize >> 24) & 0xFF);
+    private boolean matchesAscii(byte[] data, int offset, String expected) {
+        if (data.length < offset + expected.length()) {
+            return false;
+        }
+        for (int i = 0; i < expected.length(); i++) {
+            if (data[offset + i] != (byte) expected.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
 
-        return normalized;
+    private int readLittleEndianInt(byte[] data, int offset) {
+        return (data[offset] & 0xFF)
+                | ((data[offset + 1] & 0xFF) << 8)
+                | ((data[offset + 2] & 0xFF) << 16)
+                | ((data[offset + 3] & 0xFF) << 24);
+    }
+
+    private void writeLittleEndianInt(byte[] data, int offset, int value) {
+        data[offset] = (byte) (value & 0xFF);
+        data[offset + 1] = (byte) ((value >> 8) & 0xFF);
+        data[offset + 2] = (byte) ((value >> 16) & 0xFF);
+        data[offset + 3] = (byte) ((value >> 24) & 0xFF);
+    }
+
+    private record WavLayout(int dataOffset, int dataSize, int dataSizeOffset) {
     }
 }

@@ -106,7 +106,8 @@ public class WorkflowTestHarnessEvaluator {
         return builder.toString();
     }
 
-    private void append(StringBuilder builder, String text) {
+    private void append(StringBuilder builder, Object value) {
+        String text = stringify(value);
         if (StringUtils.hasText(text)) {
             if (!builder.isEmpty()) {
                 builder.append("\n");
@@ -119,14 +120,14 @@ public class WorkflowTestHarnessEvaluator {
         if (response == null) {
             return false;
         }
-        List<String> candidates = new ArrayList<>();
+        List<Object> candidates = new ArrayList<>();
         candidates.add(response.getOutputData());
         if (response.getNodeResults() != null) {
             for (ExecutionResponse.NodeResult nodeResult : response.getNodeResults()) {
                 candidates.add(nodeResult.getOutput());
             }
         }
-        for (String candidate : candidates) {
+        for (Object candidate : candidates) {
             if (jsonHasField(candidate, fieldName)) {
                 return true;
             }
@@ -134,15 +135,31 @@ public class WorkflowTestHarnessEvaluator {
         return false;
     }
 
-    private boolean jsonHasField(String json, String fieldName) {
-        if (!StringUtils.hasText(json)) {
+    private boolean jsonHasField(Object candidate, String fieldName) {
+        if (candidate == null) {
             return false;
         }
         try {
-            return objectHasField(JSON.parse(json), fieldName);
+            if (candidate instanceof String json) {
+                if (!StringUtils.hasText(json)) {
+                    return false;
+                }
+                return objectHasField(JSON.parse(json), fieldName);
+            }
+            return objectHasField(JSON.toJSON(candidate), fieldName);
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private String stringify(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof String text) {
+            return text;
+        }
+        return JSON.toJSONString(value);
     }
 
     private boolean objectHasField(Object value, String fieldName) {

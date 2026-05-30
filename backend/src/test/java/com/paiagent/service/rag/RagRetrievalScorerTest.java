@@ -34,11 +34,13 @@ class RagRetrievalScorerTest {
 
     @Test
     void searchTermsIgnoreChineseQuestionFillers() {
-        List<String> terms = scorer.searchTerms("知识库怎么导入");
+        List<String> terms = scorer.searchTerms("知识库怎么导入，提示证书过期");
 
         assertTrue(terms.contains("知识库"));
         assertTrue(terms.contains("导入"));
+        assertTrue(terms.contains("证书"));
         assertFalse(terms.contains("怎么"));
+        assertFalse(terms.contains("提示"));
         assertFalse(terms.stream().anyMatch(term -> term.contains("怎么")));
     }
 

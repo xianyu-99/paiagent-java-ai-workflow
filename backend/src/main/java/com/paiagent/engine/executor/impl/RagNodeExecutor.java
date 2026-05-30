@@ -23,8 +23,12 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
     private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
 
     private static final String DEFAULT_PROMPT = """
-            你是一个严谨的知识库问答助手。请只根据给定的知识库上下文回答问题。
-            如果上下文没有相关信息，请直接说明“知识库中没有找到相关信息”，不要编造。
+            你是企业内部服务台知识助手。请严格按 Self-RAG 流程执行：
+
+            步骤1：逐条评估每个检索片段是否与用户问题相关（relevant/irrelevant）
+            步骤2：仅基于标记为 relevant 的片段生成答案，不得引入外部知识
+            步骤3：评估答案是否被检索内容充分支撑（supported/partially/unsupported）
+            步骤4：如果支撑度为 unsupported 或检索片段全部 irrelevant，设置 nextAction=escalate_human
 
             【知识库上下文】
             {{context}}
@@ -32,7 +36,18 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             【用户问题】
             {{question}}
 
-            请用中文给出清晰、简洁的回答。涉及知识库依据时，请在句末标注对应来源编号，例如 [来源1]。
+            必须只输出一个 JSON 对象，不要输出 Markdown、代码块或额外解释。字段固定为：
+            {
+              "answer": "面向员工的简明答复",
+              "citations": ["资料名称或来源编号"],
+              "confidence": 0.0-1.0,
+              "resolved": true|false,
+              "nextAction": "direct_answer|create_ticket|escalate_human",
+              "ticketSummary": "",
+              "escalationReason": "",
+              "supportLevel": "supported|partially|unsupported",
+              "relevanceAssessment": [{"source": "来源1", "relevant": true|false}]
+            }
             """;
 
     private final KnowledgeBaseService knowledgeBaseService;
@@ -92,6 +107,8 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                 executionAdmin
         );
         String context = buildContext(chunks);
+        boolean retrievalOnly = Boolean.TRUE.equals(data.get("retrievalOnly"));
+        double topScore = chunks.isEmpty() ? 0.0 : chunks.get(0).getScore();
 
         if (progressCallback != null) {
             progressCallback.accept(ExecutionEvent.nodeProgress(
@@ -100,18 +117,37 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                     "知识库检索完成，命中 " + chunks.size() + " 个片段",
                     Map.of(
                             "retrieved", chunks.size(),
-                            "topScore", chunks.isEmpty() ? 0.0 : chunks.get(0).getScore()
+                            "topScore", topScore
                     )
             ));
         }
 
+        if (retrievalOnly) {
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("question", question);
+            output.put("output", context);
+            output.put("context", context);
+            output.put("retrievedChunks", chunks);
+            output.put("citations", buildCitations(chunks));
+            output.put("retrievedCount", chunks.size());
+            return output;
+        }
+
+        // Self-RAG 硬门控：检索为空或最高相似度低于阈值 → 直接拒绝回答
+        if (chunks.isEmpty() || topScore < minScore) {
+            Map<String, Object> output = buildRejectionOutput(question, context, chunks,
+                    chunks.isEmpty() ? "检索结果为空" : "最高相似度低于阈值（" + String.format("%.4f", topScore) + " < " + minScore + "）");
+            if (progressCallback != null) {
+                progressCallback.accept(ExecutionEvent.nodeProgress(
+                        node.getId(), node.getType(), "Self-RAG 门控：检索质量不足，已拒绝回答", Map.of()
+                ));
+            }
+            return output;
+        }
+
         WorkflowNode llmNode = buildSyntheticLlmNode(node, data, question, context);
         Map<String, Object> output = super.execute(llmNode, input, progressCallback);
-        output.put("question", question);
-        output.put("context", context);
-        output.put("retrievedChunks", chunks);
-        output.put("citations", buildCitations(chunks));
-        output.put("retrievedCount", chunks.size());
+        output = applySelfRagGuardrails(output, question, context, chunks);
         return output;
     }
 
@@ -225,6 +261,70 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             citation.append(", section=").append(chunk.getSectionTitle());
         }
         return citation.toString();
+    }
+
+    /**
+     * Self-RAG 硬门控：检索质量不足时直接返回拒绝回答的结构化输出
+     */
+    private Map<String, Object> buildRejectionOutput(String question, String context,
+                                                       List<RetrievedChunk> chunks, String reason) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        output.put("question", question);
+        output.put("answer", "知识库中未检索到足够相关的内容，已为您转接人工服务。");
+        output.put("output", "知识库中未检索到足够相关的内容，已为您转接人工服务。");
+        output.put("context", context);
+        output.put("retrievedChunks", chunks);
+        output.put("citations", buildCitations(chunks));
+        output.put("retrievedCount", chunks.size());
+        output.put("confidence", 0.0);
+        output.put("resolved", false);
+        output.put("nextAction", "escalate_human");
+        output.put("ticketSummary", question);
+        output.put("escalationReason", reason);
+        output.put("supportLevel", "unsupported");
+        output.put("relevanceAssessment", List.of());
+        return output;
+    }
+
+    /**
+     * Self-RAG 答案后校验：解析 LLM 输出，强制降级低质量答案
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> applySelfRagGuardrails(Map<String, Object> output, String question,
+                                                         String context, List<RetrievedChunk> chunks) {
+        output.put("question", question);
+        output.put("context", context);
+        output.put("retrievedChunks", chunks);
+        output.put("citations", buildCitations(chunks));
+        output.put("retrievedCount", chunks.size());
+
+        Object supportLevelObj = output.get("supportLevel");
+        String supportLevel = supportLevelObj instanceof String ? (String) supportLevelObj : "";
+        Object confidenceObj = output.get("confidence");
+        double confidence = confidenceObj instanceof Number ? ((Number) confidenceObj).doubleValue() : 0.0;
+
+        boolean shouldEscalate = "unsupported".equalsIgnoreCase(supportLevel)
+                || confidence < 0.5
+                || output.get("citations") == null
+                || ((List<?>) output.getOrDefault("citations", List.of())).isEmpty();
+
+        if (shouldEscalate) {
+            output.put("resolved", false);
+            output.put("nextAction", "escalate_human");
+            String existingReason = output.get("escalationReason") instanceof String
+                    ? (String) output.get("escalationReason") : "";
+            if (!StringUtils.hasText(existingReason)) {
+                if ("unsupported".equalsIgnoreCase(supportLevel)) {
+                    output.put("escalationReason", "答案未被检索内容支撑");
+                } else if (confidence < 0.5) {
+                    output.put("escalationReason", "置信度过低（" + String.format("%.2f", confidence) + "）");
+                } else {
+                    output.put("escalationReason", "缺少引用来源");
+                }
+            }
+        }
+
+        return output;
     }
 
     private String previewText(String text) {

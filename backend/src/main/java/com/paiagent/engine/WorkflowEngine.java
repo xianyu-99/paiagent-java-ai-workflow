@@ -37,6 +37,7 @@ public class WorkflowEngine implements WorkflowExecutor {
     private static final String NODE_OUTPUTS_CONTEXT_KEY = "__nodeOutputs__";
     private static final String EXECUTION_USER_ID_CONTEXT_KEY = "__executionUserId__";
     private static final String EXECUTION_ADMIN_CONTEXT_KEY = "__executionAdmin__";
+    private static final String EXECUTION_FLOW_ID_CONTEXT_KEY = "__executionFlowId__";
     
     @Autowired
     private DAGParser dagParser;
@@ -68,7 +69,7 @@ public class WorkflowEngine implements WorkflowExecutor {
         
         String status = "SUCCESS";
         String errorMessage = null;
-        String outputData = null;
+        Object outputData = null;
         int totalRetryCount = 0;
         int totalTimeoutCount = 0;
         
@@ -226,7 +227,7 @@ public class WorkflowEngine implements WorkflowExecutor {
                 }
             }
             
-            outputData = JSON.toJSONString(currentInput);
+            outputData = currentInput;
             
         } catch (Exception e) {
             status = "FAILED";
@@ -247,7 +248,7 @@ public class WorkflowEngine implements WorkflowExecutor {
         
         log.debug("保存执行记录 - inputData: {}", record.getInputData());
         log.debug("保存执行记录 - outputData: {}", outputData);
-        record.setOutputData(outputData);
+        record.setOutputData(outputData == null ? null : JSON.toJSONString(outputData));
         record.setStatus(status);
         record.setNodeResults(JSON.toJSONString(nodeResults));
         record.setErrorMessage(errorMessage);
@@ -342,6 +343,7 @@ public class WorkflowEngine implements WorkflowExecutor {
         cleanData.remove(NODE_OUTPUTS_CONTEXT_KEY);
         cleanData.remove(EXECUTION_USER_ID_CONTEXT_KEY);
         cleanData.remove(EXECUTION_ADMIN_CONTEXT_KEY);
+        cleanData.remove(EXECUTION_FLOW_ID_CONTEXT_KEY);
         return cleanData;
     }
 
@@ -420,6 +422,7 @@ public class WorkflowEngine implements WorkflowExecutor {
             input.put(EXECUTION_USER_ID_CONTEXT_KEY, userId);
         }
         input.put(EXECUTION_ADMIN_CONTEXT_KEY, admin);
+        input.put(EXECUTION_FLOW_ID_CONTEXT_KEY, workflow.getId());
     }
 
     private void activateTarget(

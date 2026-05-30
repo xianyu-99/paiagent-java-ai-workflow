@@ -1,5 +1,6 @@
 package com.paiagent.engine.executor.impl;
 
+import com.alibaba.fastjson2.JSON;
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.engine.reference.WorkflowReferenceResolver;
@@ -43,8 +44,16 @@ public class OutputNodeExecutor implements NodeExecutor {
 
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> outputParams = (List<Map<String, Object>>) nodeData.get("outputParams");
-        Map<String, String> paramValues = buildParamValues(outputParams, input);
+        Map<String, Object> paramValues = buildParamValues(outputParams, input);
         log.debug("Output node parameter values: {}", summarizeForLog(paramValues));
+
+        String directParamName = extractSingleTemplateParam(responseContent);
+        if (directParamName != null && paramValues.containsKey(directParamName)) {
+            Object directValue = paramValues.get(directParamName);
+            log.debug("Output node direct reference result: {}", summarizeForLog(directValue));
+            output.put("output", directValue);
+            return output;
+        }
 
         String result = replaceTemplateVariables(responseContent, paramValues);
         log.debug("Output node final result: {}", summarizeForLog(result));
@@ -56,11 +65,11 @@ public class OutputNodeExecutor implements NodeExecutor {
         return input.get("output") != null ? input.get("output") : input.get("input");
     }
 
-    private Map<String, String> buildParamValues(
+    private Map<String, Object> buildParamValues(
             List<Map<String, Object>> outputParams,
             Map<String, Object> input
     ) {
-        Map<String, String> paramValues = new HashMap<>();
+        Map<String, Object> paramValues = new HashMap<>();
         if (outputParams == null) {
             return paramValues;
         }
@@ -72,7 +81,7 @@ public class OutputNodeExecutor implements NodeExecutor {
             if ("input".equals(paramType)) {
                 Object value = param.get("value");
                 if (value != null) {
-                    paramValues.put(paramName, value.toString());
+                    paramValues.put(paramName, value);
                 }
                 continue;
             }
@@ -81,7 +90,7 @@ public class OutputNodeExecutor implements NodeExecutor {
                 String reference = (String) param.get("referenceNode");
                 Object value = WorkflowReferenceResolver.resolve(reference, input);
                 if (value != null) {
-                    paramValues.put(paramName, value.toString());
+                    paramValues.put(paramName, value);
                 }
             }
         }
@@ -89,18 +98,37 @@ public class OutputNodeExecutor implements NodeExecutor {
         return paramValues;
     }
 
-    private String replaceTemplateVariables(String template, Map<String, String> paramValues) {
+    private String stringifyValue(Object value) {
+        if (value instanceof Map<?, ?> || value instanceof List<?>) {
+            return JSON.toJSONString(value);
+        }
+        return value.toString();
+    }
+
+    private String replaceTemplateVariables(String template, Map<String, Object> paramValues) {
         Matcher matcher = TEMPLATE_PATTERN.matcher(template);
         StringBuffer result = new StringBuffer();
 
         while (matcher.find()) {
             String paramName = matcher.group(1).trim();
-            String paramValue = paramValues.getOrDefault(paramName, "");
+            Object rawValue = paramValues.get(paramName);
+            String paramValue = rawValue == null ? "" : stringifyValue(rawValue);
             matcher.appendReplacement(result, Matcher.quoteReplacement(paramValue));
         }
         matcher.appendTail(result);
 
         return result.toString();
+    }
+
+    private String extractSingleTemplateParam(String template) {
+        if (template == null) {
+            return null;
+        }
+        Matcher matcher = TEMPLATE_PATTERN.matcher(template.trim());
+        if (!matcher.matches()) {
+            return null;
+        }
+        return matcher.group(1).trim();
     }
 
     private Map<String, Object> removeInternalContext(Map<String, Object> data) {

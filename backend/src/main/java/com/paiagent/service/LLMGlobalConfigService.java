@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.paiagent.entity.LLMGlobalConfig;
+import com.paiagent.engine.llm.LLMProviderRegistry;
 import com.paiagent.mapper.LLMGlobalConfigMapper;
 import org.springframework.beans.BeanUtils;
 import org.springframework.stereotype.Service;
@@ -22,7 +23,7 @@ public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, L
     }
 
     public List<LLMGlobalConfig> listByProvider(String provider) {
-        return decryptConfigs(listRawByProvider(provider));
+        return decryptConfigs(listRawByProvider(LLMProviderRegistry.normalizeProvider(provider)));
     }
 
     public List<LLMGlobalConfig> listAllForDisplay() {
@@ -37,8 +38,9 @@ public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, L
     }
 
     public LLMGlobalConfig getDefaultConfig(String provider) {
+        String normalizedProvider = LLMProviderRegistry.normalizeProvider(provider);
         LambdaQueryWrapper<LLMGlobalConfig> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(LLMGlobalConfig::getProvider, provider)
+        wrapper.eq(LLMGlobalConfig::getProvider, normalizedProvider)
                 .eq(LLMGlobalConfig::getIsDefault, 1);
         return decryptConfig(this.getOne(wrapper));
     }
@@ -153,9 +155,9 @@ public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, L
     }
 
     private void normalizeConfig(LLMGlobalConfig config) {
-        config.setProvider(canonicalizeProvider(trimToNull(config.getProvider())));
+        config.setProvider(LLMProviderRegistry.normalizeProvider(trimToNull(config.getProvider())));
         config.setConfigName(trimToNull(config.getConfigName()));
-        config.setApiUrl(trimToNull(config.getApiUrl()));
+        config.setApiUrl(LLMProviderRegistry.resolveBaseUrl(config.getProvider(), config.getApiUrl()));
         config.setApiKey(trimToNull(config.getApiKey()));
         config.setModel(trimToNull(config.getModel()));
     }
@@ -170,6 +172,7 @@ public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, L
         if (config.getApiUrl() == null) {
             throw new IllegalArgumentException("API 地址不能为空");
         }
+        validateApiUrl(config.getApiUrl());
         if (config.getApiKey() == null) {
             throw new IllegalArgumentException("API 密钥不能为空");
         }
@@ -228,19 +231,10 @@ public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, L
         return trimmed.isEmpty() ? null : trimmed;
     }
 
-    private String canonicalizeProvider(String provider) {
-        if (provider == null) {
-            return null;
+    private void validateApiUrl(String apiUrl) {
+        String lowerUrl = apiUrl.toLowerCase(Locale.ROOT);
+        if (lowerUrl.contains("/docs") || lowerUrl.contains("/ai-models") || lowerUrl.contains("www.kimi.com")) {
+            throw new IllegalArgumentException("API 地址不能填写文档或网页地址，请填写接口根地址，例如 https://api.kimi.com/coding 或 https://api.moonshot.cn");
         }
-
-        return switch (provider.toLowerCase(Locale.ROOT)) {
-            case "open ai" -> "openai";
-            case "deep seek" -> "deepseek";
-            case "通义千问" -> "qwen";
-            case "stepfun", "阶跃星辰" -> "step";
-            case "ai ping" -> "ai_ping";
-            case "智谱" -> "zhipu";
-            default -> provider;
-        };
     }
 }

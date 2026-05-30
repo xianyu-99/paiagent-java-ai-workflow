@@ -21,13 +21,14 @@ import com.paiagent.service.document.DocumentParsingService;
 import com.paiagent.service.document.ParsedDocument;
 import com.paiagent.service.document.ParsedSegment;
 import com.paiagent.service.rag.RagRetrievalScorer;
-import com.paiagent.service.vector.KnowledgeVectorStoreService;
+import com.paiagent.service.vector.KnowledgeVectorStore;
 import com.paiagent.service.vector.VectorSearchHit;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import com.baomidou.mybatisplus.extension.toolkit.Db;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -70,7 +71,7 @@ public class KnowledgeBaseService {
 
     private final TextEmbeddingService textEmbeddingService;
 
-    private final KnowledgeVectorStoreService knowledgeVectorStoreService;
+    private final KnowledgeVectorStore knowledgeVectorStore;
 
     private final DocumentParsingService documentParsingService;
 
@@ -83,7 +84,7 @@ public class KnowledgeBaseService {
                                 KnowledgeChunkMapper knowledgeChunkMapper,
                                 KnowledgeImportTaskMapper knowledgeImportTaskMapper,
                                 TextEmbeddingService textEmbeddingService,
-                                KnowledgeVectorStoreService knowledgeVectorStoreService,
+                                KnowledgeVectorStore knowledgeVectorStore,
                                 DocumentParsingService documentParsingService,
                                 RagRetrievalScorer ragRetrievalScorer,
                                 @Qualifier("ragImportTaskExecutor") ThreadPoolTaskExecutor ragImportTaskExecutor) {
@@ -92,20 +93,87 @@ public class KnowledgeBaseService {
         this.knowledgeChunkMapper = knowledgeChunkMapper;
         this.knowledgeImportTaskMapper = knowledgeImportTaskMapper;
         this.textEmbeddingService = textEmbeddingService;
-        this.knowledgeVectorStoreService = knowledgeVectorStoreService;
+        this.knowledgeVectorStore = knowledgeVectorStore;
         this.documentParsingService = documentParsingService;
         this.ragRetrievalScorer = ragRetrievalScorer;
         this.ragImportTaskExecutor = ragImportTaskExecutor;
     }
 
     public List<KnowledgeBaseResponse> listKnowledgeBases(Long userId, boolean admin) {
-        LambdaQueryWrapper<KnowledgeBase> wrapper = new LambdaQueryWrapper<KnowledgeBase>()
-                .orderByDesc(KnowledgeBase::getUpdatedAt);
+        LambdaQueryWrapper<KnowledgeBase> wrapper = new LambdaQueryWrapper<>();
         if (!admin) {
-            wrapper.eq(KnowledgeBase::getOwnerId, userId);
+            wrapper.and(owner -> owner
+                    .eq(KnowledgeBase::getOwnerId, userId)
+                    .or()
+                    .isNull(KnowledgeBase::getOwnerId));
         }
-        return knowledgeBaseMapper.selectList(wrapper).stream()
-                .map(this::toResponse)
+        wrapper.orderByDesc(KnowledgeBase::getUpdatedAt);
+        List<KnowledgeBase> list = knowledgeBaseMapper.selectList(wrapper);
+        if (list.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> kbIds = list.stream().map(KnowledgeBase::getId).toList();
+
+        // 批量查询文档数
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<KnowledgeDocument> docWrapper = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        docWrapper.select("knowledge_base_id", "count(*) as count")
+                .in("knowledge_base_id", kbIds)
+                .groupBy("knowledge_base_id");
+        List<Map<String, Object>> docMaps = knowledgeDocumentMapper.selectMaps(docWrapper);
+        Map<Long, Long> docCounts = docMaps.stream().collect(Collectors.toMap(
+                m -> {
+                    Object val = m.get("knowledge_base_id");
+                    if (val == null) {
+                        val = m.get("KNOWLEDGE_BASE_ID");
+                    }
+                    return ((Number) val).longValue();
+                },
+                m -> {
+                    Object val = m.get("count");
+                    if (val == null) {
+                        val = m.get("COUNT");
+                    }
+                    return ((Number) val).longValue();
+                },
+                (a, b) -> a
+        ));
+
+        // 批量查询片段数
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<KnowledgeChunk> chunkWrapper = new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        chunkWrapper.select("knowledge_base_id", "count(*) as count")
+                .in("knowledge_base_id", kbIds)
+                .groupBy("knowledge_base_id");
+        List<Map<String, Object>> chunkMaps = knowledgeChunkMapper.selectMaps(chunkWrapper);
+        Map<Long, Long> chunkCounts = chunkMaps.stream().collect(Collectors.toMap(
+                m -> {
+                    Object val = m.get("knowledge_base_id");
+                    if (val == null) {
+                        val = m.get("KNOWLEDGE_BASE_ID");
+                    }
+                    return ((Number) val).longValue();
+                },
+                m -> {
+                    Object val = m.get("count");
+                    if (val == null) {
+                        val = m.get("COUNT");
+                    }
+                    return ((Number) val).longValue();
+                },
+                (a, b) -> a
+        ));
+
+        return list.stream()
+                .map(kb -> new KnowledgeBaseResponse(
+                        kb.getId(),
+                        kb.getName(),
+                        kb.getDescription(),
+                        kb.getOwnerId(),
+                        docCounts.getOrDefault(kb.getId(), 0L),
+                        chunkCounts.getOrDefault(kb.getId(), 0L),
+                        kb.getCreatedAt(),
+                        kb.getUpdatedAt()
+                ))
                 .toList();
     }
 
@@ -120,10 +188,10 @@ public class KnowledgeBaseService {
 
     public KnowledgeBase getAuthorizedKnowledgeBase(Long id, Long userId, boolean admin) {
         KnowledgeBase knowledgeBase = knowledgeBaseMapper.selectById(id);
-        if (knowledgeBase == null) {
+        if (knowledgeBase == null || isDeleted(knowledgeBase)) {
             throw new IllegalArgumentException("知识库不存在");
         }
-        if (!admin && (knowledgeBase.getOwnerId() == null || !knowledgeBase.getOwnerId().equals(userId))) {
+        if (!admin && knowledgeBase.getOwnerId() != null && !knowledgeBase.getOwnerId().equals(userId)) {
             throw new ForbiddenException("无权访问该知识库");
         }
         return knowledgeBase;
@@ -135,7 +203,7 @@ public class KnowledgeBaseService {
                                                         String content,
                                                         Long userId,
                                                         boolean admin) {
-        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        getWritableKnowledgeBase(knowledgeBaseId, userId, admin);
         if (!StringUtils.hasText(content)) {
             throw new IllegalArgumentException("文档内容不能为空");
         }
@@ -149,7 +217,7 @@ public class KnowledgeBaseService {
                                                         byte[] bytes,
                                                         Long userId,
                                                         boolean admin) {
-        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        getWritableKnowledgeBase(knowledgeBaseId, userId, admin);
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("文档内容不能为空");
         }
@@ -165,7 +233,7 @@ public class KnowledgeBaseService {
                                                        String content,
                                                        Long userId,
                                                        boolean admin) {
-        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        getWritableKnowledgeBase(knowledgeBaseId, userId, admin);
         if (!StringUtils.hasText(content)) {
             throw new IllegalArgumentException("文档内容不能为空");
         }
@@ -189,7 +257,7 @@ public class KnowledgeBaseService {
                                                        byte[] bytes,
                                                        Long userId,
                                                        boolean admin) {
-        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        getWritableKnowledgeBase(knowledgeBaseId, userId, admin);
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("文档内容不能为空");
         }
@@ -285,7 +353,7 @@ public class KnowledgeBaseService {
         int safeContextMaxChars = Math.max(MIN_CONTEXT_MAX_CHARS, Math.min(MAX_CONTEXT_MAX_CHARS, contextMaxChars));
         int candidateLimit = Math.max(safeTopK * 6, safeTopK + 12);
         List<Double> queryEmbedding = textEmbeddingService.embed(query);
-        List<VectorSearchHit> vectorHits = knowledgeVectorStoreService.search(knowledgeBaseId, queryEmbedding, candidateLimit, 0.0);
+        List<VectorSearchHit> vectorHits = knowledgeVectorStore.search(knowledgeBaseId, queryEmbedding, candidateLimit, 0.0);
         List<KnowledgeChunk> keywordHits = searchKeywordCandidates(knowledgeBaseId, query, candidateLimit);
 
         Map<Long, RetrievalCandidate> candidates = new LinkedHashMap<>();
@@ -369,7 +437,7 @@ public class KnowledgeBaseService {
 
     @Transactional
     public KnowledgeReindexResponse rebuildEmbeddings(Long knowledgeBaseId, Long userId, boolean admin) {
-        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
+        getWritableKnowledgeBase(knowledgeBaseId, userId, admin);
         List<KnowledgeChunk> chunks = knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
                 .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
                 .orderByAsc(KnowledgeChunk::getDocumentId)
@@ -391,9 +459,9 @@ public class KnowledgeBaseService {
             KnowledgeChunk chunk = chunks.get(i);
             chunk.setEmbedding(textEmbeddingService.serialize(embeddings.get(i)));
             applyEmbeddingMetadata(chunk);
-            knowledgeChunkMapper.updateById(chunk);
         }
-        knowledgeVectorStoreService.upsert(chunks);
+        Db.updateBatchById(chunks);
+        knowledgeVectorStore.upsert(chunks);
 
         return new KnowledgeReindexResponse(
                 knowledgeBaseId,
@@ -406,12 +474,24 @@ public class KnowledgeBaseService {
 
     @Transactional
     public void deleteKnowledgeBase(Long id, Long userId, boolean admin) {
-        getAuthorizedKnowledgeBase(id, userId, admin);
-        knowledgeVectorStoreService.deleteKnowledgeBase(id);
+        getWritableKnowledgeBase(id, userId, admin);
+        knowledgeVectorStore.deleteKnowledgeBase(id);
         knowledgeChunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunk>().eq(KnowledgeChunk::getKnowledgeBaseId, id));
         knowledgeDocumentMapper.delete(new LambdaQueryWrapper<KnowledgeDocument>().eq(KnowledgeDocument::getKnowledgeBaseId, id));
         knowledgeImportTaskMapper.delete(new LambdaQueryWrapper<KnowledgeImportTask>().eq(KnowledgeImportTask::getKnowledgeBaseId, id));
         knowledgeBaseMapper.deleteById(id);
+    }
+
+    private KnowledgeBase getWritableKnowledgeBase(Long id, Long userId, boolean admin) {
+        KnowledgeBase knowledgeBase = getAuthorizedKnowledgeBase(id, userId, admin);
+        if (!admin && knowledgeBase.getOwnerId() == null) {
+            throw new ForbiddenException("无权修改该知识库");
+        }
+        return knowledgeBase;
+    }
+
+    private boolean isDeleted(KnowledgeBase knowledgeBase) {
+        return Integer.valueOf(1).equals(knowledgeBase.getDeleted());
     }
 
     private KnowledgeImportTask createImportTask(Long knowledgeBaseId,
@@ -559,10 +639,10 @@ public class KnowledgeBaseService {
                 chunk.setEmbedding(textEmbeddingService.serialize(embeddings.get(i)));
                 applyEmbeddingMetadata(chunk);
                 chunk.setTokenCount(estimateTokens(draft.content()));
-                knowledgeChunkMapper.insert(chunk);
                 batchChunks.add(chunk);
             }
-            knowledgeVectorStoreService.upsert(batchChunks);
+            Db.saveBatch(batchChunks);
+            knowledgeVectorStore.upsert(batchChunks);
             insertedChunks.addAll(batchChunks);
             processed += batchChunks.size();
             int progress = 30 + (int) Math.round(65.0 * processed / chunks.size());
@@ -644,22 +724,10 @@ public class KnowledgeBaseService {
             return List.of();
         }
 
+        String joinedTerms = String.join(" ", terms);
         LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<KnowledgeChunk>()
                 .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
-                .and(nested -> {
-                    for (int i = 0; i < terms.size(); i++) {
-                        String term = terms.get(i);
-                        if (i > 0) {
-                            nested.or();
-                        }
-                        nested.and(termWrapper -> termWrapper
-                                .like(KnowledgeChunk::getContent, term)
-                                .or()
-                                .like(KnowledgeChunk::getSourceName, term)
-                                .or()
-                                .like(KnowledgeChunk::getSectionTitle, term));
-                    }
-                })
+                .apply("MATCH(content, source_name, section_title) AGAINST({0} IN BOOLEAN MODE)", joinedTerms)
                 .last("LIMIT " + Math.max(1, limit));
         return knowledgeChunkMapper.selectList(wrapper);
     }
@@ -817,10 +885,46 @@ public class KnowledgeBaseService {
     }
 
     private int estimateTokens(String text) {
-        if (text == null) {
+        if (text == null || text.isEmpty()) {
             return 0;
         }
-        return Math.max(1, text.length() / 2);
+        int tokenCount = 0;
+        int length = text.length();
+        for (int i = 0; i < length; ) {
+            int codePoint = text.codePointAt(i);
+            if (isCjk(codePoint)) {
+                tokenCount++;
+                i += Character.charCount(codePoint);
+            } else {
+                // Skip whitespace, then count a word
+                while (i < length && Character.isWhitespace(text.codePointAt(i))) {
+                    i++;
+                }
+                if (i < length) {
+                    tokenCount++;
+                    while (i < length && !Character.isWhitespace(text.codePointAt(i))) {
+                        i++;
+                    }
+                }
+            }
+        }
+        return Math.max(1, tokenCount);
+    }
+
+    private boolean isCjk(int codePoint) {
+        return (codePoint >= 0x4E00 && codePoint <= 0x9FFF)
+                || (codePoint >= 0x3400 && codePoint <= 0x4DBF)
+                || (codePoint >= 0x20000 && codePoint <= 0x2A6DF)
+                || (codePoint >= 0x2A700 && codePoint <= 0x2B73F)
+                || (codePoint >= 0x2B740 && codePoint <= 0x2B81F)
+                || (codePoint >= 0x2B820 && codePoint <= 0x2CEAF)
+                || (codePoint >= 0x2F800 && codePoint <= 0x2FA1F)
+                || (codePoint >= 0x3000 && codePoint <= 0x303F)
+                || (codePoint >= 0x3040 && codePoint <= 0x309F)
+                || (codePoint >= 0x30A0 && codePoint <= 0x30FF)
+                || (codePoint >= 0xAC00 && codePoint <= 0xD7AF)
+                || (codePoint >= 0xF900 && codePoint <= 0xFAFF)
+                || (codePoint >= 0xFF00 && codePoint <= 0xFFEF);
     }
 
     private record ChunkDraft(
@@ -876,9 +980,9 @@ public class KnowledgeBaseService {
 
         private KnowledgeChunk chunk;
 
-        private Double vectorScore = 0.0;
+        private Double vectorScore;
 
-        private Double keywordScore = 0.0;
+        private Double keywordScore;
 
         private Double rerankScore = 0.0;
 

@@ -1,19 +1,36 @@
 package com.paiagent.config;
 
+import com.paiagent.service.TextEmbeddingService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 @Slf4j
 @Component
 public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
+    private final TextEmbeddingService textEmbeddingService;
 
-    public KnowledgeBaseMigrationRunner(JdbcTemplate jdbcTemplate) {
+    private static final String DEFAULT_LLM_OUTPUT_SCHEMA = """
+            {"type":"object","properties":{"output":{"type":"object","properties":{"answer":{"type":"string"},"citations":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"},"resolved":{"type":"boolean"},"nextAction":{"type":"string"},"ticketSummary":{"type":"string"},"escalationReason":{"type":"string"}}},"answer":{"type":"string"},"citations":{"type":"array","items":{"type":"string"}},"confidence":{"type":"number"},"resolved":{"type":"boolean"},"nextAction":{"type":"string"},"ticketSummary":{"type":"string"},"escalationReason":{"type":"string"},"tokens":{"type":"number"},"inputTokens":{"type":"number"},"outputTokens":{"type":"number"},"totalTokens":{"type":"number"}}}
+            """;
+
+    private static final String DEFAULT_LLM_CONFIG_SCHEMA = """
+            {"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"apiKey":{"type":"string"},"model":{"type":"string"},"skillName":{"type":"string","default":"service-desk-answer"},"prompt":{"type":"string","default":"你是企业服务台助手。请结合用户问题、RAG 上下文和引用来源回答，只输出 answer、citations、confidence、resolved、nextAction、ticketSummary、escalationReason 组成的 JSON。"},"temperature":{"type":"number","default":0.2},"maxTokens":{"type":"number","default":1200}}}
+            """;
+
+    public KnowledgeBaseMigrationRunner(JdbcTemplate jdbcTemplate,
+                                        TextEmbeddingService textEmbeddingService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.textEmbeddingService = textEmbeddingService;
     }
 
     @Override
@@ -29,6 +46,7 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         hideLegacyProviderNodeDefinitions();
         upsertTtsNodeDefinition();
         upsertRagNodeDefinition();
+        seedEnterpriseServiceDeskKnowledge();
     }
 
     private void createKnowledgeBaseTable() {
@@ -95,7 +113,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     deleted TINYINT DEFAULT 0,
                     INDEX idx_chunk_kb_id (knowledge_base_id),
-                    INDEX idx_chunk_doc_id (document_id)
+                    INDEX idx_chunk_doc_id (document_id),
+                    FULLTEXT INDEX idx_chunk_fulltext (content, source_name, section_title)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表'
                 """);
     }
@@ -190,8 +209,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     'KNOWLEDGE',
                     '📚',
                     '{"type":"object","properties":{"question":{"type":"string"}}}',
-                    '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"retrievedChunks":{"type":"array"},"retrievedCount":{"type":"number"}}}',
-                    '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"contextWindow":{"type":"number","default":1},"contextMaxChars":{"type":"number","default":1800},"configId":{"type":"number"},"prompt":{"type":"string"}}}'
+                    '{"type":"object","properties":{"output":{"type":"string"},"context":{"type":"string"},"citations":{"type":"array"},"retrievedChunks":{"type":"array"},"retrievedCount":{"type":"number"}}}',
+                    '{"type":"object","properties":{"knowledgeBaseId":{"type":"number"},"retrievalOnly":{"type":"boolean","default":false},"topK":{"type":"number","default":3},"minScore":{"type":"number","default":0},"contextWindow":{"type":"number","default":1},"contextMaxChars":{"type":"number","default":1800},"configId":{"type":"number"},"prompt":{"type":"string"}}}'
                 )
                 ON DUPLICATE KEY UPDATE
                     display_name = VALUES(display_name),
@@ -231,8 +250,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                 "LLM",
                 "🤖",
                 "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"tokens\":{\"type\":\"number\"}}}",
-                "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"prompt\":{\"type\":\"string\"},\"temperature\":{\"type\":\"number\",\"default\":0.7},\"maxTokens\":{\"type\":\"number\",\"default\":1000}}}"
+                DEFAULT_LLM_OUTPUT_SCHEMA.strip(),
+                DEFAULT_LLM_CONFIG_SCHEMA.strip()
         );
         upsertNodeDefinition(
                 "condition",
@@ -297,6 +316,365 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     deleted = 0,
                     updated_at = CURRENT_TIMESTAMP
                 """);
+    }
+
+    private void seedEnterpriseServiceDeskKnowledge() {
+        Long knowledgeBaseId = ensureKnowledgeBase(
+                "企业服务台示例知识库",
+                "企业服务台助手默认示例资料，覆盖 VPN、报销、请假、产品 FAQ 与客服升级规则。"
+        );
+
+        seedKnowledgeDocument(
+                knowledgeBaseId,
+                "VPN 排障 SOP.md",
+                "enterprise-vpn-sop",
+                "VPN 排障 SOP",
+                readSeedResource("knowledge-base/enterprise-service-desk/vpn-troubleshooting-sop.md")
+        );
+        seedKnowledgeDocument(
+                knowledgeBaseId,
+                "报销制度.md",
+                "enterprise-expense-policy",
+                "报销制度",
+                readSeedResource("knowledge-base/enterprise-service-desk/expense-policy.md")
+        );
+        seedKnowledgeDocument(
+                knowledgeBaseId,
+                "请假制度.md",
+                "enterprise-leave-policy",
+                "请假制度",
+                readSeedResource("knowledge-base/enterprise-service-desk/leave-policy.md")
+        );
+        seedKnowledgeDocument(
+                knowledgeBaseId,
+                "产品 FAQ.md",
+                "enterprise-product-faq",
+                "产品 FAQ",
+                readSeedResource("knowledge-base/enterprise-service-desk/product-faq.md")
+        );
+        seedKnowledgeDocument(
+                knowledgeBaseId,
+                "客服升级规则.md",
+                "enterprise-support-escalation",
+                "客服升级规则",
+                readSeedResource("knowledge-base/enterprise-service-desk/support-escalation-rules.md")
+        );
+        seedEnterpriseServiceDeskWorkflow(knowledgeBaseId);
+    }
+
+    private void seedEnterpriseServiceDeskWorkflow(Long knowledgeBaseId) {
+        String flowData = """
+                {
+                  "nodes": [
+                    {
+                      "id": "input-default",
+                      "type": "input",
+                      "position": {"x": 80, "y": 180},
+                      "data": {"label": "Input 用户问题", "type": "input"}
+                    },
+                    {
+                      "id": "rag-enterprise-kb",
+                      "type": "rag",
+                      "position": {"x": 330, "y": 180},
+                      "data": {
+                        "label": "RAG 检索企业知识库",
+                        "type": "rag",
+                        "knowledgeBaseId": %d,
+                        "retrievalOnly": true,
+                        "topK": 4,
+                        "minScore": 0,
+                        "contextWindow": 1,
+                        "contextMaxChars": 2400,
+                        "inputParams": [
+                          {"name": "question", "type": "reference", "referenceNode": "input-default.input"}
+                        ]
+                      }
+                    },
+                    {
+                      "id": "llm-service-desk",
+                      "type": "llm",
+                      "position": {"x": 610, "y": 180},
+                      "data": {
+                        "label": "LLM 生成带引用答案",
+                        "type": "llm",
+                        "skillName": "service-desk-answer",
+                        "temperature": 0.2,
+                        "prompt": "请基于用户问题、RAG 上下文和引用来源生成企业服务台处理结果。用户问题：{{question}}。RAG 上下文：{{context}}。引用来源：{{citations}}。只输出固定 JSON 字段：answer、citations、confidence、resolved、nextAction、ticketSummary、escalationReason。",
+                        "inputParams": [
+                          {"name": "question", "type": "reference", "referenceNode": "input-default.input"},
+                          {"name": "context", "type": "reference", "referenceNode": "rag-enterprise-kb.context"},
+                          {"name": "citations", "type": "reference", "referenceNode": "rag-enterprise-kb.citations"}
+                        ],
+                        "outputParams": [
+                          {"name": "output", "type": "object", "description": "企业服务台结构化 JSON"}
+                        ]
+                      }
+                    },
+                    {
+                      "id": "condition-high-confidence",
+                      "type": "condition",
+                      "position": {"x": 900, "y": 260},
+                      "data": {
+                        "label": "置信度 >= 0.80",
+                        "type": "condition",
+                        "leftType": "reference",
+                        "leftReference": "llm-service-desk.confidence",
+                        "operator": "gte",
+                        "rightValue": "0.8",
+                        "caseSensitive": false
+                      }
+                    },
+                    {
+                      "id": "condition-direct-action",
+                      "type": "condition",
+                      "position": {"x": 1180, "y": 80},
+                      "data": {
+                        "label": "动作：直接答复",
+                        "type": "condition",
+                        "leftType": "reference",
+                        "leftReference": "llm-service-desk.nextAction",
+                        "operator": "equals",
+                        "rightValue": "direct_answer",
+                        "caseSensitive": false
+                      }
+                    },
+                    {
+                      "id": "condition-ticket-action",
+                      "type": "condition",
+                      "position": {"x": 1180, "y": 440},
+                      "data": {
+                        "label": "动作：生成工单",
+                        "type": "condition",
+                        "leftType": "reference",
+                        "leftReference": "llm-service-desk.nextAction",
+                        "operator": "equals",
+                        "rightValue": "create_ticket",
+                        "caseSensitive": false
+                      }
+                    },
+                    {
+                      "id": "output-direct-answer",
+                      "type": "output",
+                      "position": {"x": 1470, "y": 80},
+                      "data": {
+                        "label": "Output 直接回答",
+                        "type": "output",
+                        "outputParams": [
+                          {"name": "answerPayload", "type": "reference", "referenceNode": "llm-service-desk.output"}
+                        ],
+                        "responseContent": "{{answerPayload}}"
+                      }
+                    },
+                    {
+                      "id": "output-create-ticket",
+                      "type": "output",
+                      "position": {"x": 1470, "y": 350},
+                      "data": {
+                        "label": "Output 工单摘要",
+                        "type": "output",
+                        "outputParams": [
+                          {"name": "answerPayload", "type": "reference", "referenceNode": "llm-service-desk.output"}
+                        ],
+                        "responseContent": "{{answerPayload}}"
+                      }
+                    },
+                    {
+                      "id": "output-escalate-human",
+                      "type": "output",
+                      "position": {"x": 1470, "y": 560},
+                      "data": {
+                        "label": "Output 升级人工",
+                        "type": "output",
+                        "outputParams": [
+                          {"name": "answerPayload", "type": "reference", "referenceNode": "llm-service-desk.output"}
+                        ],
+                        "responseContent": "{{answerPayload}}"
+                      }
+                    }
+                  ],
+                  "edges": [
+                    {"id": "edge-input-rag", "source": "input-default", "target": "rag-enterprise-kb"},
+                    {"id": "edge-rag-llm", "source": "rag-enterprise-kb", "target": "llm-service-desk"},
+                    {"id": "edge-llm-confidence", "source": "llm-service-desk", "target": "condition-high-confidence"},
+                    {"id": "edge-confidence-direct-action", "source": "condition-high-confidence", "target": "condition-direct-action", "sourceHandle": "true"},
+                    {"id": "edge-confidence-ticket-action", "source": "condition-high-confidence", "target": "condition-ticket-action", "sourceHandle": "false"},
+                    {"id": "edge-direct-action-answer", "source": "condition-direct-action", "target": "output-direct-answer", "sourceHandle": "true"},
+                    {"id": "edge-direct-action-ticket", "source": "condition-direct-action", "target": "condition-ticket-action", "sourceHandle": "false"},
+                    {"id": "edge-ticket-action-ticket", "source": "condition-ticket-action", "target": "output-create-ticket", "sourceHandle": "true"},
+                    {"id": "edge-ticket-action-escalate", "source": "condition-ticket-action", "target": "output-escalate-human", "sourceHandle": "false"}
+                  ]
+                }
+                """.formatted(knowledgeBaseId);
+
+        String workflowDescription = "默认企业内部服务台 / 知识流程助手 Demo：Input -> RAG -> LLM -> 置信度 / nextAction 路由 -> Output。";
+        Long existingWorkflowId = jdbcTemplate.query("""
+                        SELECT id FROM workflow
+                        WHERE name = ? AND owner_id IS NULL AND deleted = 0
+                        ORDER BY id ASC
+                        LIMIT 1
+                        """,
+                rs -> rs.next() ? rs.getLong("id") : null,
+                "企业服务台助手"
+        );
+        if (existingWorkflowId != null) {
+            jdbcTemplate.update("""
+                            UPDATE workflow
+                            SET description = ?, flow_data = ?, engine_type = 'dag'
+                            WHERE id = ?
+                            """,
+                    workflowDescription,
+                    flowData,
+                    existingWorkflowId
+            );
+            return;
+        }
+
+        jdbcTemplate.update("""
+                        INSERT INTO workflow (name, description, flow_data, engine_type, owner_id, deleted)
+                        VALUES (?, ?, ?, 'dag', NULL, 0)
+                        """,
+                "企业服务台助手",
+                workflowDescription,
+                flowData
+        );
+    }
+
+    private Long ensureKnowledgeBase(String name, String description) {
+        Long existingId = jdbcTemplate.query("""
+                        SELECT id FROM knowledge_base
+                        WHERE name = ? AND deleted = 0
+                        ORDER BY id ASC
+                        LIMIT 1
+                        """,
+                rs -> rs.next() ? rs.getLong("id") : null,
+                name
+        );
+        if (existingId != null) {
+            return existingId;
+        }
+
+        jdbcTemplate.update(
+                "INSERT INTO knowledge_base (name, description, owner_id, deleted) VALUES (?, ?, NULL, 0)",
+                name,
+                description
+        );
+        return jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+    }
+
+    private String readSeedResource(String classpathLocation) {
+        ClassPathResource resource = new ClassPathResource(classpathLocation);
+        try {
+            return resource.getContentAsString(StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new IllegalStateException("Failed to read service desk seed resource: " + classpathLocation, e);
+        }
+    }
+
+    private void seedKnowledgeDocument(Long knowledgeBaseId,
+                                       String fileName,
+                                       String contentHash,
+                                       String sectionTitle,
+                                       String content) {
+        String normalizedContent = content.strip();
+        List<Double> embedding = textEmbeddingService.embed(normalizedContent);
+        String embeddingJson = textEmbeddingService.serialize(embedding);
+        int tokenCount = Math.max(1, normalizedContent.length() / 4);
+
+        Long existingDocumentId = jdbcTemplate.query("""
+                        SELECT id FROM knowledge_document
+                        WHERE knowledge_base_id = ? AND content_hash = ? AND deleted = 0
+                        ORDER BY id ASC
+                        LIMIT 1
+                        """,
+                rs -> rs.next() ? rs.getLong("id") : null,
+                knowledgeBaseId,
+                contentHash
+        );
+
+        Long documentId = existingDocumentId;
+        if (documentId == null) {
+            jdbcTemplate.update("""
+                            INSERT INTO knowledge_document
+                                (knowledge_base_id, owner_id, file_name, content_type, parser_type, content_hash, chunk_count, deleted)
+                            VALUES (?, NULL, ?, 'text/markdown', 'seed', ?, 1, 0)
+                            """,
+                    knowledgeBaseId,
+                    fileName,
+                    contentHash
+            );
+            documentId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        } else {
+            jdbcTemplate.update("""
+                            UPDATE knowledge_document
+                            SET file_name = ?, content_type = 'text/markdown', parser_type = 'seed', chunk_count = 1
+                            WHERE id = ?
+                            """,
+                    fileName,
+                    documentId
+            );
+        }
+
+        Integer chunkCount = jdbcTemplate.queryForObject("""
+                        SELECT COUNT(*) FROM knowledge_chunk
+                        WHERE knowledge_base_id = ? AND document_id = ? AND source_name = ? AND chunk_index = 0 AND deleted = 0
+                        """,
+                Integer.class,
+                knowledgeBaseId,
+                documentId,
+                fileName
+        );
+        if (chunkCount != null && chunkCount > 0) {
+            jdbcTemplate.update("""
+                            UPDATE knowledge_chunk
+                            SET content = ?,
+                                content_type = 'text/markdown',
+                                section_title = ?,
+                                start_offset = 0,
+                                end_offset = ?,
+                                embedding = ?,
+                                embedding_provider = ?,
+                                embedding_model = ?,
+                                embedding_dimension = ?,
+                                token_count = ?
+                            WHERE knowledge_base_id = ?
+                              AND document_id = ?
+                              AND source_name = ?
+                              AND chunk_index = 0
+                              AND deleted = 0
+                            """,
+                    normalizedContent,
+                    sectionTitle,
+                    normalizedContent.length(),
+                    embeddingJson,
+                    textEmbeddingService.provider(),
+                    textEmbeddingService.model(),
+                    textEmbeddingService.dimensions(),
+                    tokenCount,
+                    knowledgeBaseId,
+                    documentId,
+                    fileName
+            );
+            return;
+        }
+
+        jdbcTemplate.update("""
+                        INSERT INTO knowledge_chunk
+                            (knowledge_base_id, document_id, chunk_index, content, source_name, content_type, section_title, page_number,
+                             start_offset, end_offset, embedding, embedding_provider, embedding_model, embedding_dimension, token_count, deleted)
+                        VALUES (?, ?, 0, ?, ?, 'text/markdown', ?, NULL, 0, ?, ?, ?, ?, ?, ?, 0)
+                        """,
+                knowledgeBaseId,
+                documentId,
+                normalizedContent,
+                fileName,
+                sectionTitle,
+                normalizedContent.length(),
+                embeddingJson,
+                textEmbeddingService.provider(),
+                textEmbeddingService.model(),
+                textEmbeddingService.dimensions(),
+                tokenCount
+        );
     }
 
 }

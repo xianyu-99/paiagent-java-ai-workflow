@@ -3,6 +3,7 @@ import { Alert, Button, Card, Input, Spin, Typography, message } from 'antd';
 import { SendOutlined } from '@ant-design/icons';
 import { useParams } from 'react-router-dom';
 import AudioPlayer from '../components/AudioPlayer';
+import ServiceDeskResultCard from '../components/ServiceDeskResultCard';
 import {
   ExecutionNodeResult,
   ExecutionResponse,
@@ -16,15 +17,6 @@ const { Text } = Typography;
 type AudioOutput = {
   audioUrl: string;
   fileName?: string;
-};
-
-type Citation = {
-  ref?: string;
-  sourceName?: string;
-  sectionTitle?: string;
-  pageNumber?: number;
-  score?: number;
-  preview?: string;
 };
 
 const parseMaybeJson = (value: unknown): unknown => {
@@ -70,7 +62,7 @@ const extractAudioOutput = (result: ExecutionResponse | null): AudioOutput | nul
   return null;
 };
 
-const pickDisplayOutput = (result: ExecutionResponse | null): unknown => {
+const pickResultOutput = (result: ExecutionResponse | null): unknown => {
   if (!result) {
     return '';
   }
@@ -80,10 +72,6 @@ const pickDisplayOutput = (result: ExecutionResponse | null): unknown => {
   }
 
   const output = parseMaybeJson(result.outputData);
-  const outputRecord = asRecord(output);
-  if (typeof outputRecord?.output === 'string') {
-    return outputRecord.output;
-  }
   if (output !== undefined && output !== null && output !== '') {
     return output;
   }
@@ -91,64 +79,6 @@ const pickDisplayOutput = (result: ExecutionResponse | null): unknown => {
   const successfulNodes = (result.nodeResults || []).filter((node: ExecutionNodeResult) => node.status === 'SUCCESS');
   const lastNode = successfulNodes[successfulNodes.length - 1];
   return parseMaybeJson(lastNode?.output) || '';
-};
-
-const formatOutput = (value: unknown) => {
-  if (typeof value === 'string') {
-    return value;
-  }
-  return JSON.stringify(value, null, 2);
-};
-
-const isCitation = (value: unknown): value is Citation => {
-  const record = asRecord(value);
-  return !!record && (
-    typeof record.ref === 'string' ||
-    typeof record.sourceName === 'string' ||
-    typeof record.preview === 'string'
-  );
-};
-
-const extractCitations = (result: ExecutionResponse | null): Citation[] => {
-  if (!result) {
-    return [];
-  }
-
-  const citations: Citation[] = [];
-  const seen = new Set<string>();
-  const candidates: unknown[] = [parseMaybeJson(result.outputData)];
-  for (const node of result.nodeResults || []) {
-    candidates.push(parseMaybeJson(node.output));
-  }
-
-  for (const candidate of candidates) {
-    const record = asRecord(candidate);
-    const rawCitations = Array.isArray(record?.citations)
-      ? record.citations
-      : Array.isArray(record?.sources)
-        ? record.sources
-        : [];
-
-    for (const rawCitation of rawCitations) {
-      if (!isCitation(rawCitation)) {
-        continue;
-      }
-      const key = [
-        rawCitation.ref || '',
-        rawCitation.sourceName || '',
-        rawCitation.pageNumber || '',
-        rawCitation.sectionTitle || '',
-        rawCitation.preview || ''
-      ].join('|');
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
-      citations.push(rawCitation);
-    }
-  }
-
-  return citations;
 };
 
 const PublishedWorkflowPage = () => {
@@ -186,8 +116,7 @@ const PublishedWorkflowPage = () => {
   }, [shareKey]);
 
   const audioOutput = useMemo(() => extractAudioOutput(result), [result]);
-  const displayOutput = useMemo(() => formatOutput(pickDisplayOutput(result)), [result]);
-  const citations = useMemo(() => extractCitations(result), [result]);
+  const resultOutput = useMemo(() => pickResultOutput(result), [result]);
 
   const handleRun = async () => {
     if (!shareKey) {
@@ -246,7 +175,7 @@ const PublishedWorkflowPage = () => {
           <Input.TextArea
             value={inputData}
             onChange={(event) => setInputData(event.target.value)}
-            placeholder="请输入要处理的内容"
+            placeholder="请输入企业服务台问题，例如：我连不上公司 VPN，提示证书过期，怎么办？"
             rows={12}
           />
           <Button
@@ -268,34 +197,16 @@ const PublishedWorkflowPage = () => {
             </div>
           )}
 
-          {!running && audioOutput && (
-            <AudioPlayer audioUrl={audioOutput.audioUrl} fileName={audioOutput.fileName} />
-          )}
-
           {!running && result && (
             <>
-              <pre className="whitespace-pre-wrap break-words text-sm text-gray-800 bg-gray-50 border rounded p-4 max-h-[520px] overflow-auto">
-                {displayOutput}
-              </pre>
-              {citations.length > 0 && (
-                <div className="mt-4 border rounded p-4 bg-white">
-                  <div className="font-medium text-gray-900 mb-3">引用来源</div>
-                  <div className="space-y-3">
-                    {citations.map((citation, index) => (
-                      <div key={`${citation.ref || index}-${citation.sourceName || 'source'}`} className="text-sm text-gray-700">
-                        <div className="font-medium">
-                          {citation.ref || `来源${index + 1}`}
-                          {citation.sourceName ? ` · ${citation.sourceName}` : ''}
-                          {citation.pageNumber ? ` · 第 ${citation.pageNumber} 页` : ''}
-                          {citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}
-                          {typeof citation.score === 'number' ? ` · score ${citation.score.toFixed(3)}` : ''}
-                        </div>
-                        {citation.preview && (
-                          <div className="text-gray-500 mt-1">{citation.preview}</div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
+              <ServiceDeskResultCard
+                value={resultOutput}
+                rawTitle="Raw output JSON"
+                rawMaxHeightClassName="max-h-[520px]"
+              />
+              {audioOutput && (
+                <div className="mt-3">
+                  <AudioPlayer audioUrl={audioOutput.audioUrl} fileName={audioOutput.fileName} />
                 </div>
               )}
             </>

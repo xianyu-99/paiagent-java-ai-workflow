@@ -27,7 +27,7 @@ public class ChatClientFactory {
     /**
      * 根据提供商和配置创建ChatClient
      *
-     * @param provider    提供商标识 (openai/deepseek/qwen/step/zhipu/ai_ping)
+     * @param provider    提供商标识
      * @param apiUrl      API端点URL
      * @param apiKey      API密钥
      * @param model       模型名称
@@ -42,7 +42,7 @@ public class ChatClientFactory {
     /**
      * 创建带 Function Calling 支持的 ChatClient
      *
-     * @param provider    提供商标识 (openai/deepseek/qwen/step/zhipu/ai_ping)
+     * @param provider    提供商标识
      * @param apiUrl      API端点URL
      * @param apiKey      API密钥
      * @param model       模型名称
@@ -53,22 +53,23 @@ public class ChatClientFactory {
     public ChatClient createClientWithFunctions(String provider, String apiUrl, String apiKey,
                                                  String model, Double temperature,
                                                  List<FunctionCallback> functions) {
-        String normalizedProvider = normalizeProvider(provider);
+        List<FunctionCallback> safeFunctions = functions == null ? List.of() : functions;
+        String normalizedProvider = LLMProviderRegistry.normalizeProvider(provider);
+        String resolvedApiUrl = LLMProviderRegistry.resolveBaseUrl(normalizedProvider, apiUrl);
         log.info("创建ChatClient - 类型: {}, URL: {}, 模型: {}, 温度: {}, 函数数量: {}",
-                normalizedProvider, apiUrl, model, temperature, functions.size());
+                normalizedProvider, resolvedApiUrl, model, temperature, safeFunctions.size());
 
-        ChatModel chatModel = switch (normalizedProvider) {
-            case "openai", "deepseek", "qwen", "step", "zhipu", "ai_ping" ->
-                    createOpenAICompatibleModel(apiUrl, apiKey, model, temperature);
-            default -> throw new IllegalArgumentException("不支持的提供商类型: " + provider);
+        ChatModel chatModel = switch (LLMProviderRegistry.getApiType(normalizedProvider)) {
+            case OPENAI_COMPATIBLE ->
+                    createOpenAICompatibleModel(resolvedApiUrl, apiKey, model, temperature);
         };
 
         ChatClient.Builder builder = ChatClient.builder(chatModel);
 
         // 注册函数 - 直接传入 FunctionCallback 实例
-        if (functions != null && !functions.isEmpty()) {
-            builder.defaultFunctions(functions.toArray(new FunctionCallback[0]));
-            for (FunctionCallback function : functions) {
+        if (!safeFunctions.isEmpty()) {
+            builder.defaultFunctions(safeFunctions.toArray(new FunctionCallback[0]));
+            for (FunctionCallback function : safeFunctions) {
                 log.debug("注册函数: {}", function.getName());
             }
         }
@@ -77,8 +78,7 @@ public class ChatClientFactory {
     }
 
     /**
-     * 创建OpenAI兼容的ChatModel
-     * 支持OpenAI、DeepSeek和通义千问（通过OpenAI兼容接口）
+     * 创建 OpenAI 兼容的 ChatModel。
      */
     private ChatModel createOpenAICompatibleModel(String apiUrl, String apiKey,
                                                    String model, Double temperature) {
@@ -126,20 +126,4 @@ public class ChatClientFactory {
         return value.substring(0, end);
     }
 
-    private String normalizeProvider(String provider) {
-        if (provider == null) {
-            return "";
-        }
-
-        String normalized = provider.trim().toLowerCase(Locale.ROOT);
-        return switch (normalized) {
-            case "open ai" -> "openai";
-            case "deep seek" -> "deepseek";
-            case "通义千问" -> "qwen";
-            case "stepfun", "阶跃星辰" -> "step";
-            case "智谱" -> "zhipu";
-            case "ai ping" -> "ai_ping";
-            default -> normalized;
-        };
-    }
 }

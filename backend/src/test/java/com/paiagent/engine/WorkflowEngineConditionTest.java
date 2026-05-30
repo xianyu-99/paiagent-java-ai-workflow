@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,7 +41,7 @@ class WorkflowEngineConditionTest {
 
         assertNotNull(response);
         assertEquals("SUCCESS", response.getStatus());
-        assertTrue(response.getOutputData().contains("TRUE_BRANCH"));
+        assertTrue(String.valueOf(response.getOutputData()).contains("TRUE_BRANCH"));
         assertEquals(3, response.getNodeResults().size());
     }
 
@@ -50,8 +51,25 @@ class WorkflowEngineConditionTest {
 
         assertNotNull(response);
         assertEquals("SUCCESS", response.getStatus());
-        assertTrue(response.getOutputData().contains("FALSE_BRANCH"));
+        assertTrue(String.valueOf(response.getOutputData()).contains("FALSE_BRANCH"));
         assertEquals(3, response.getNodeResults().size());
+    }
+
+    @Test
+    void shouldExposeEnterpriseServiceDeskFinalOutputAsBusinessObject() {
+        ExecutionResponse response = workflowEngine.execute(
+                createEnterpriseServiceDeskWorkflow(),
+                "我连不上公司 VPN，提示证书过期，怎么办？"
+        );
+
+        assertNotNull(response);
+        assertEquals("SUCCESS", response.getStatus());
+
+        Map<?, ?> outputEnvelope = assertInstanceOf(Map.class, response.getOutputData());
+        Map<?, ?> businessPayload = assertInstanceOf(Map.class, outputEnvelope.get("output"));
+        assertEquals("create_ticket", businessPayload.get("nextAction"));
+        assertTrue(businessPayload.containsKey("answer"));
+        assertTrue(businessPayload.containsKey("citations"));
     }
 
     private Workflow createConditionWorkflow() {
@@ -61,6 +79,50 @@ class WorkflowEngineConditionTest {
         workflow.setEngineType("dag");
         workflow.setFlowData(JSON.toJSONString(buildConditionConfig()));
         return workflow;
+    }
+
+    private Workflow createEnterpriseServiceDeskWorkflow() {
+        Workflow workflow = new Workflow();
+        workflow.setId(102L);
+        workflow.setName("enterprise-service-desk-object-output-test");
+        workflow.setEngineType("dag");
+        workflow.setFlowData(JSON.toJSONString(buildEnterpriseServiceDeskConfig()));
+        return workflow;
+    }
+
+    private WorkflowConfig buildEnterpriseServiceDeskConfig() {
+        List<WorkflowNode> nodes = new ArrayList<>();
+        nodes.add(node("input-default", "input", Map.of("label", "输入", "type", "input")));
+
+        Map<String, Object> llmData = new HashMap<>();
+        llmData.put("label", "LLM 生成服务台答案");
+        llmData.put("type", "llm");
+        llmData.put("skillName", "service-desk-answer");
+        llmData.put("prompt", "请输出企业服务台结构化 JSON。");
+        llmData.put("inputParams", List.of(
+                Map.of("name", "question", "type", "reference", "referenceNode", "input-default.input")
+        ));
+        llmData.put("outputParams", List.of(
+                Map.of("name", "output", "type", "object")
+        ));
+        nodes.add(node("llm-service-desk", "llm", llmData));
+
+        Map<String, Object> outputData = new HashMap<>();
+        outputData.put("label", "Output 业务对象");
+        outputData.put("type", "output");
+        outputData.put("outputParams", List.of(
+                Map.of("name", "answerPayload", "type", "reference", "referenceNode", "llm-service-desk.output")
+        ));
+        outputData.put("responseContent", "{{answerPayload}}");
+        nodes.add(node("output-service-desk", "output", outputData));
+
+        WorkflowConfig config = new WorkflowConfig();
+        config.setNodes(nodes);
+        config.setEdges(List.of(
+                edge("e1", "input-default", "llm-service-desk", null),
+                edge("e2", "llm-service-desk", "output-service-desk", null)
+        ));
+        return config;
     }
 
     private WorkflowConfig buildConditionConfig() {

@@ -51,6 +51,26 @@ class OutputNodeExecutorTest {
     }
 
     @Test
+    void shouldPreserveStructuredObjectWhenTemplateIsSingleReference() {
+        WorkflowNode node = outputNode(
+                "{{answerPayload}}",
+                List.of(referenceParam("answerPayload", "llm-1.output"))
+        );
+        Map<String, Object> payload = Map.of(
+                "answer", "VPN 排障步骤",
+                "confidence", 0.86d
+        );
+
+        Map<String, Object> output = executor.execute(node, Map.of(
+                "__nodeOutputs__", Map.of(
+                        "llm-1", Map.of("output", payload)
+                )
+        ));
+
+        assertEquals(payload, output.get("output"));
+    }
+
+    @Test
     void shouldKeepUserInputCompatibilityFallback() {
         WorkflowNode node = outputNode(
                 "Question: {{question}}",

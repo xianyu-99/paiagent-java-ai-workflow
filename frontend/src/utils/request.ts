@@ -8,6 +8,13 @@ interface RetryableAxiosRequestConfig extends InternalAxiosRequestConfig {
 
 const isAbsoluteApiBaseUrl = /^https?:\/\//.test(API_BASE_URL);
 
+const isApiResult = (data: unknown): data is { code: number; message?: string; data?: unknown } => {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  return typeof (data as { code?: unknown }).code === 'number';
+};
+
 /**
  * Axios 实例
  */
@@ -64,6 +71,11 @@ api.interceptors.response.use(
       clearStoredAuth();
       window.location.href = '/login';
     }
+
+    if (error.response?.data && isApiResult(error.response.data)) {
+      return error.response.data;
+    }
+
     return Promise.reject(error);
   }
 );
