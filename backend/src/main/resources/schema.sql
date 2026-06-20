@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     page_number INT NULL COMMENT 'PDF 页码',
     start_offset INT NULL COMMENT '原文起始偏移',
     end_offset INT NULL COMMENT '原文结束偏移',
-    embedding JSON NOT NULL COMMENT '切片向量 JSON',
+    embedding JSON NOT NULL COMMENT '切片向量 JSON（仅在导入/重建时用作 Qdrant 源，检索不读此列。Qdrant 迁移稳定后可设为 NULL）',
     embedding_provider VARCHAR(50) NULL COMMENT 'Embedding provider',
     embedding_model VARCHAR(100) NULL COMMENT 'Embedding model',
     embedding_dimension INT NULL COMMENT 'Embedding dimension',

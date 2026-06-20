@@ -69,6 +69,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         Long knowledgeBaseId = toLong(data.get("knowledgeBaseId"));
         int topK = toInt(data.get("topK"), 3);
         double minScore = toDouble(data.get("minScore"), 0.0);
+        double answerGateThreshold = toDouble(data.get("answerGateThreshold"), minScore);
         int contextWindow = toInt(data.get("contextWindow"), 1);
         int contextMaxChars = toInt(data.get("contextMaxChars"), 1800);
         String question = resolveQuestion(data, input);
@@ -134,7 +135,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         }
 
         // Self-RAG 硬门控：检索为空或最高相似度低于阈值 → 直接拒绝回答
-        RetrievalGateDecision gateDecision = evaluateRetrievalGate(chunks, minScore);
+        RetrievalGateDecision gateDecision = evaluateRetrievalGate(chunks, answerGateThreshold);
         if (gateDecision.rejected()) {
             Map<String, Object> output = buildRejectionOutput(question, context, chunks, gateDecision.reason());
             if (progressCallback != null) {
@@ -151,30 +152,30 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         return output;
     }
 
-    private RetrievalGateDecision evaluateRetrievalGate(List<RetrievedChunk> chunks, double minScore) {
+    private RetrievalGateDecision evaluateRetrievalGate(List<RetrievedChunk> chunks, double answerGateThreshold) {
         if (chunks == null || chunks.isEmpty()) {
             return RetrievalGateDecision.reject("retrieval returned no chunks");
         }
 
-        double threshold = Math.max(0.0d, minScore);
-        if (threshold <= 0.0d) {
+        double gateThreshold = Math.max(0.0d, answerGateThreshold);
+        if (gateThreshold <= 0.0d) {
             return RetrievalGateDecision.pass();
         }
 
         RetrievedChunk topChunk = chunks.get(0);
         double topScore = scoreOf(topChunk.getScore());
-        if (topScore >= threshold) {
+        if (topScore >= gateThreshold) {
             return RetrievalGateDecision.pass();
         }
 
-        double nearThreshold = threshold * 0.75d;
+        double nearThreshold = gateThreshold * 0.75d;
         if (topScore >= nearThreshold && hasKeywordEvidence(topChunk)) {
             return RetrievalGateDecision.pass();
         }
 
         return RetrievalGateDecision.reject(
                 "top retrieval score below layered gate (" + String.format("%.4f", topScore)
-                        + " < " + threshold + ")"
+                        + " < " + gateThreshold + ")"
         );
     }
 
