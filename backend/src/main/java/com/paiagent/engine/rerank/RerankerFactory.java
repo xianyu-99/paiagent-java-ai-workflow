@@ -25,17 +25,19 @@ public class RerankerFactory {
     private final Reranker reranker;
 
     public RerankerFactory(RerankerProperties properties) {
+        // Try LLMReranker first (qwen-turbo + DashScope compatible API — most reliable)
+        LLMReranker llmReranker = new LLMReranker(properties);
+        if (llmReranker.isAvailable()) {
+            log.info("RerankerFactory: using LLMReranker (qwen-turbo via DashScope compatible API)");
+            this.reranker = llmReranker;
+            return;
+        }
+
+        // Fall back to dedicated DashScope Rerank API (requires gte-rerank model access)
         DashScopeReranker dashScopeReranker = new DashScopeReranker(properties);
         if (dashScopeReranker.isAvailable()) {
             log.info("RerankerFactory: using DashScopeReranker (model={})", properties.getModel());
             this.reranker = dashScopeReranker;
-            return;
-        }
-
-        LLMReranker llmReranker = new LLMReranker(properties);
-        if (llmReranker.isAvailable()) {
-            log.info("RerankerFactory: using LLMReranker (fallback)");
-            this.reranker = llmReranker;
             return;
         }
 

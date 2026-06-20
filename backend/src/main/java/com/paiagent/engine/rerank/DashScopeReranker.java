@@ -52,6 +52,9 @@ public class DashScopeReranker implements Reranker {
 
     private final EmbeddingApiKeyResolver apiKeyResolver;
 
+    /** Set to true when the API returns AccessDenied (403), so future isAvailable() checks fail. */
+    private volatile boolean accessDenied = false;
+
     public DashScopeReranker(RerankerProperties properties) {
         this.enabled = properties.isEnabled();
         this.model = properties.getModel() != null ? properties.getModel() : "gte-rerank";
@@ -67,6 +70,9 @@ public class DashScopeReranker implements Reranker {
 
     @Override
     public boolean isAvailable() {
+        if (accessDenied) {
+            return false;
+        }
         if (!enabled) {
             log.debug("DashScopeReranker is disabled");
             return false;
@@ -146,6 +152,11 @@ public class DashScopeReranker implements Reranker {
                 }
                 sleepBackoff(retry);
             } catch (RestClientResponseException e) {
+                if (e.getStatusCode().value() == 403) {
+                    log.warn("DashScopeReranker: Access Denied (403) — your API key may not have Rerank model access. Marking unavailable.");
+                    accessDenied = true;
+                    return candidates;
+                }
                 log.warn("DashScopeReranker: HTTP {} (attempt {}/{}): {}",
                         e.getStatusCode().value(), retry + 1, maxRetries + 1, e.getMessage());
                 if (isRetryable(e.getStatusCode().value())) {
