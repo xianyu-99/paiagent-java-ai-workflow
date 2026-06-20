@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.paiagent.common.ForbiddenException;
 import com.paiagent.dto.RetrievedChunk;
+import com.paiagent.engine.tokenizer.ChineseTokenizer;
 import com.paiagent.entity.KnowledgeBase;
 import com.paiagent.entity.KnowledgeChunk;
 import com.paiagent.mapper.KnowledgeBaseMapper;
@@ -40,7 +41,7 @@ class KnowledgeBaseServiceTest {
         KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
         TextEmbeddingService embeddingService = mock(TextEmbeddingService.class);
         KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
-        RagRetrievalScorer scorer = new RagRetrievalScorer();
+        RagRetrievalScorer scorer = new RagRetrievalScorer(new ChineseTokenizer("的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16));
 
         KnowledgeBaseService service = new KnowledgeBaseService(
                 mock(KnowledgeBaseMapper.class),
@@ -92,7 +93,7 @@ class KnowledgeBaseServiceTest {
                 embeddingService,
                 vectorStore,
                 mock(DocumentParsingService.class),
-                new RagRetrievalScorer(),
+                new RagRetrievalScorer(new ChineseTokenizer("的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16)),
                 mock(ThreadPoolTaskExecutor.class)
         );
 
@@ -167,7 +168,7 @@ class KnowledgeBaseServiceTest {
                 mock(TextEmbeddingService.class),
                 mock(KnowledgeVectorStore.class),
                 mock(DocumentParsingService.class),
-                new RagRetrievalScorer(),
+                new RagRetrievalScorer(new ChineseTokenizer("的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16)),
                 mock(ThreadPoolTaskExecutor.class)
         );
     }

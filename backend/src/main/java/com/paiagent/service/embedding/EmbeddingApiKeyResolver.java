@@ -5,7 +5,7 @@ import org.springframework.util.StringUtils;
 import java.util.List;
 import java.util.Map;
 
-final class EmbeddingApiKeyResolver {
+public final class EmbeddingApiKeyResolver {
 
     private static final List<String> ENV_KEY_CANDIDATES = List.of(
             "RAG_EMBEDDING_API_KEY",
@@ -15,11 +15,15 @@ final class EmbeddingApiKeyResolver {
             "API_KEY"
     );
 
-    private EmbeddingApiKeyResolver() {
+    public EmbeddingApiKeyResolver() {
     }
 
-    static String resolve(String configuredApiKey) {
+    public static String resolve(String configuredApiKey) {
         return resolve(configuredApiKey, System.getenv());
+    }
+
+    public String resolve() {
+        return resolve("", System.getenv());
     }
 
     static String resolve(String configuredApiKey, Map<String, String> environment) {

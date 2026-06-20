@@ -1,5 +1,6 @@
 package com.paiagent.service.rag;
 
+import com.paiagent.engine.tokenizer.ChineseTokenizer;
 import com.paiagent.entity.KnowledgeChunk;
 import org.junit.jupiter.api.Test;
 
@@ -10,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RagRetrievalScorerTest {
 
-    private final RagRetrievalScorer scorer = new RagRetrievalScorer();
+    private final ChineseTokenizer tokenizer = new ChineseTokenizer(
+            "的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16);
+    private final RagRetrievalScorer scorer = new RagRetrievalScorer(tokenizer);
 
     @Test
     void keywordScoreMatchesChineseTermsAndMetadata() {

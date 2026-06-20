@@ -126,6 +126,12 @@
 			<artifactId>commons-compress</artifactId>
 			<version>1.26.2</version>
 		</dependency>
+		<!-- Jsoup HTML parser for data cleaning pipeline -->
+		<dependency>
+			<groupId>org.jsoup</groupId>
+			<artifactId>jsoup</artifactId>
+			<version>1.18.1</version>
+		</dependency>
 		<!-- Spring AI OpenAI (支持OpenAI、DeepSeek和通义千问的OpenAI兼容接口) -->
 		<dependency>
 			<groupId>org.springframework.ai</groupId>
@@ -181,6 +187,13 @@
 			<artifactId>jjwt-jackson</artifactId>
 			<version>0.12.7</version>
 			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Jieba Chinese tokenizer -->
+		<dependency>
+			<groupId>com.huaban</groupId>
+			<artifactId>jieba-analysis</artifactId>
+			<version>1.0.2</version>
 		</dependency>
 	</dependencies>
 

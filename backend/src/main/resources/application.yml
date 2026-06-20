@@ -106,6 +106,20 @@ paiagent:
     tts-executor-pool-size: ${TTS_EXECUTOR_POOL_SIZE:4}
     tts-executor-queue-capacity: ${TTS_EXECUTOR_QUEUE_CAPACITY:100}
   rag:
+    retrieval:
+      tokenizer:
+        stop-words: ${RAG_TOKENIZER_STOP_WORDS:的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这}
+        max-search-terms: ${RAG_TOKENIZER_MAX_SEARCH_TERMS:16}
+      bm25:
+        k1: ${RAG_BM25_K1:1.2}
+        b: ${RAG_BM25_B:0.75}
+    rerank:
+      enabled: ${RAG_RERANK_ENABLED:true}
+      model: ${RAG_RERANK_MODEL:gte-rerank}
+      base-url: ${RAG_RERANK_BASE_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
+      timeout-ms: ${RAG_RERANK_TIMEOUT_MS:10000}
+      max-retries: ${RAG_RERANK_MAX_RETRIES:2}
+      llm-fallback-enabled: ${RAG_RERANK_LLM_FALLBACK_ENABLED:true}
     embedding:
       provider: ${RAG_EMBEDDING_PROVIDER:dashscope}
       base-url: ${RAG_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}

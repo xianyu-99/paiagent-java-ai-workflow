@@ -21,6 +21,7 @@ import com.paiagent.service.document.DocumentParsingService;
 import com.paiagent.service.document.ParsedDocument;
 import com.paiagent.service.document.ParsedSegment;
 import com.paiagent.service.rag.RagRetrievalScorer;
+import com.paiagent.service.rag.RetrievalCandidate;
 import com.paiagent.service.vector.KnowledgeVectorStore;
 import com.paiagent.service.vector.VectorSearchHit;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -982,104 +983,4 @@ public class KnowledgeBaseService {
         }
     }
 
-    private static class RetrievalCandidate {
-
-        private final Long chunkId;
-
-        private KnowledgeChunk chunk;
-
-        private Double vectorScore;
-
-        private Double keywordScore;
-
-        private Double rerankScore = 0.0;
-
-        private Integer rank = 0;
-
-        private List<String> matchedTerms = List.of();
-
-        private String contextContent = "";
-
-        private List<Integer> contextChunkIndexes = List.of();
-
-        private RetrievalCandidate(Long chunkId) {
-            this.chunkId = chunkId;
-        }
-
-        private Long chunkId() {
-            return chunkId;
-        }
-
-        private KnowledgeChunk chunk() {
-            return chunk;
-        }
-
-        private RetrievalCandidate chunk(KnowledgeChunk chunk) {
-            this.chunk = chunk;
-            return this;
-        }
-
-        private Double vectorScore() {
-            return vectorScore;
-        }
-
-        private RetrievalCandidate vectorScore(Double vectorScore) {
-            this.vectorScore = vectorScore;
-            return this;
-        }
-
-        private Double keywordScore() {
-            return keywordScore;
-        }
-
-        private RetrievalCandidate keywordScore(Double keywordScore) {
-            this.keywordScore = keywordScore;
-            return this;
-        }
-
-        private Double rerankScore() {
-            return rerankScore;
-        }
-
-        private RetrievalCandidate rerankScore(Double rerankScore) {
-            this.rerankScore = rerankScore;
-            return this;
-        }
-
-        private Integer rank() {
-            return rank;
-        }
-
-        private RetrievalCandidate rank(Integer rank) {
-            this.rank = rank;
-            return this;
-        }
-
-        private List<String> matchedTerms() {
-            return matchedTerms;
-        }
-
-        private RetrievalCandidate matchedTerms(List<String> matchedTerms) {
-            this.matchedTerms = matchedTerms == null ? List.of() : matchedTerms;
-            return this;
-        }
-
-        private String contextContent() {
-            return contextContent;
-        }
-
-        private RetrievalCandidate contextContent(String contextContent) {
-            this.contextContent = contextContent == null ? "" : contextContent;
-            return this;
-        }
-
-        private List<Integer> contextChunkIndexes() {
-            return contextChunkIndexes;
-        }
-
-        private RetrievalCandidate contextChunkIndexes(List<Integer> contextChunkIndexes) {
-            this.contextChunkIndexes = contextChunkIndexes == null ? List.of() : contextChunkIndexes;
-            return this;
-        }
-    }
 }

@@ -48,3 +48,6 @@ Thumbs.db
 downloads/
 .reasonix/
 tools/
+
+# Python
+__pycache__/
