@@ -527,9 +527,6 @@ public class KnowledgeBaseService {
                     ? bm25Scores.getOrDefault(candidate.chunkId(), 0.0)
                     : (candidate.keywordScore() == null ? 0.0 : candidate.keywordScore());
             sparseScores.put(candidate.chunkId(), sparse);
-            if (useBm25 && candidate.keywordScore() != null) {
-                candidate.keywordScore(candidate.keywordScore());
-            }
         }
 
         Map<Long, Double> denseSorted = sortByValueDescending(denseScores);
