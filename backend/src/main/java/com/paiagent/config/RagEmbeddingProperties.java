@@ -25,4 +25,20 @@ public class RagEmbeddingProperties {
     private Integer timeoutMs = 30000;
 
     private Integer batchSize = 16;
+
+    private Boolean cacheEnabled = true;
+
+    private Integer cacheTtlSeconds = 3600;
+
+    private Integer cacheMaxSize = 2048;
+
+    private Integer maxConcurrentRequests = 4;
+
+    private Double rateLimitPermitsPerSecond = 4.0;
+
+    private Integer retryMaxAttempts = 3;
+
+    private Integer retryInitialBackoffMs = 300;
+
+    private Integer retryMaxBackoffMs = 2000;
 }

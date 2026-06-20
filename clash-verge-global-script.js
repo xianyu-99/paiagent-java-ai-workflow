@@ -459,6 +459,10 @@ const domesticDirectRules = [
   "PROCESS-NAME,Trae.exe,全局直连",
   "PROCESS-NAME,trae.exe,全局直连",
 
+  "DOMAIN,api-huacloud.net,全局直连",
+  "DOMAIN,api.xmancdn.net,全局直连",
+  "DOMAIN-SUFFIX,xmancdn.net,全局直连",
+
   "DOMAIN-SUFFIX,qq.com,全局直连",
   "DOMAIN-SUFFIX,weixin.qq.com,全局直连",
   "DOMAIN-SUFFIX,wechat.com,全局直连",
@@ -786,6 +790,17 @@ const nodeFilter = [
   "SS",
 ].join("|");
 
+const infoNodeFilter = [
+  "Traffic:",
+  "Expire:",
+  "剩余流量",
+  "套餐到期",
+  "距离下次重置",
+  "官网",
+  "订阅",
+  "更新",
+].join("|");
+
 const proxyGroups = [
   {
     ...groupBaseOption,
@@ -799,8 +814,8 @@ const proxyGroups = [
     name: "Codex",
     type: "select",
     proxies: [
-      "节点选择",
       "Codex-日本自动",
+      "节点选择",
       "美国节点",
       "手动选择",
       "自动选择",
@@ -816,6 +831,7 @@ const proxyGroups = [
     tolerance: 80,
     "include-all": true,
     filter: jpFilter,
+    "exclude-filter": infoNodeFilter,
     icon: "https://fastly.jsdelivr.net/gh/clash-verge-rev/clash-verge-rev.github.io@main/docs/assets/icons/flags/jp.svg",
   },
   {
@@ -823,8 +839,8 @@ const proxyGroups = [
     name: "Gemini",
     type: "select",
     proxies: [
-      "节点选择",
       "Gemini-美新自动",
+      "节点选择",
       "美国节点",
       "手动选择",
       "自动选择",
@@ -840,6 +856,7 @@ const proxyGroups = [
     tolerance: 80,
     "include-all": true,
     filter: usSgFilter,
+    "exclude-filter": infoNodeFilter,
     icon: "https://www.gstatic.com/lamda/images/gemini_sparkle_aurora_33f86dc0c0257da337c63.svg",
   },
   {
@@ -856,6 +873,7 @@ const proxyGroups = [
     tolerance: 80,
     "include-all": true,
     filter: usFilter,
+    "exclude-filter": infoNodeFilter,
     icon: "https://fastly.jsdelivr.net/gh/clash-verge-rev/clash-verge-rev.github.io@main/docs/assets/icons/flags/us.svg",
   },
   {
@@ -865,6 +883,7 @@ const proxyGroups = [
     tolerance: 100,
     "include-all": true,
     filter: nodeFilter,
+    "exclude-filter": infoNodeFilter,
     icon: "https://fastly.jsdelivr.net/gh/clash-verge-rev/clash-verge-rev.github.io@main/docs/assets/icons/speed.svg",
   },
   {
@@ -872,6 +891,7 @@ const proxyGroups = [
     name: "手动选择",
     type: "select",
     "include-all": true,
+    "exclude-filter": infoNodeFilter,
     icon: "https://fastly.jsdelivr.net/gh/clash-verge-rev/clash-verge-rev.github.io@main/docs/assets/icons/adjust.svg",
   },
   {
@@ -880,6 +900,7 @@ const proxyGroups = [
     type: "fallback",
     "include-all": true,
     filter: nodeFilter,
+    "exclude-filter": infoNodeFilter,
     icon: "https://fastly.jsdelivr.net/gh/clash-verge-rev/clash-verge-rev.github.io@main/docs/assets/icons/ambulance.svg",
   },
   {

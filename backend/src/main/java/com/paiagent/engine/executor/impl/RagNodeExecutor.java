@@ -108,7 +108,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         );
         String context = buildContext(chunks);
         boolean retrievalOnly = Boolean.TRUE.equals(data.get("retrievalOnly"));
-        double topScore = chunks.isEmpty() ? 0.0 : chunks.get(0).getScore();
+        double topScore = chunks.isEmpty() ? 0.0 : scoreOf(chunks.get(0).getScore());
 
         if (progressCallback != null) {
             progressCallback.accept(ExecutionEvent.nodeProgress(
@@ -134,9 +134,9 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         }
 
         // Self-RAG 硬门控：检索为空或最高相似度低于阈值 → 直接拒绝回答
-        if (chunks.isEmpty() || topScore < minScore) {
-            Map<String, Object> output = buildRejectionOutput(question, context, chunks,
-                    chunks.isEmpty() ? "检索结果为空" : "最高相似度低于阈值（" + String.format("%.4f", topScore) + " < " + minScore + "）");
+        RetrievalGateDecision gateDecision = evaluateRetrievalGate(chunks, minScore);
+        if (gateDecision.rejected()) {
+            Map<String, Object> output = buildRejectionOutput(question, context, chunks, gateDecision.reason());
             if (progressCallback != null) {
                 progressCallback.accept(ExecutionEvent.nodeProgress(
                         node.getId(), node.getType(), "Self-RAG 门控：检索质量不足，已拒绝回答", Map.of()
@@ -149,6 +149,58 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         Map<String, Object> output = super.execute(llmNode, input, progressCallback);
         output = applySelfRagGuardrails(output, question, context, chunks);
         return output;
+    }
+
+    private RetrievalGateDecision evaluateRetrievalGate(List<RetrievedChunk> chunks, double minScore) {
+        if (chunks == null || chunks.isEmpty()) {
+            return RetrievalGateDecision.reject("retrieval returned no chunks");
+        }
+
+        double threshold = Math.max(0.0d, minScore);
+        if (threshold <= 0.0d) {
+            return RetrievalGateDecision.pass();
+        }
+
+        RetrievedChunk topChunk = chunks.get(0);
+        double topScore = scoreOf(topChunk.getScore());
+        if (topScore >= threshold) {
+            return RetrievalGateDecision.pass();
+        }
+
+        double nearThreshold = threshold * 0.75d;
+        if (topScore >= nearThreshold && hasKeywordEvidence(topChunk)) {
+            return RetrievalGateDecision.pass();
+        }
+
+        return RetrievalGateDecision.reject(
+                "top retrieval score below layered gate (" + String.format("%.4f", topScore)
+                        + " < " + threshold + ")"
+        );
+    }
+
+    private boolean hasKeywordEvidence(RetrievedChunk chunk) {
+        if (chunk == null) {
+            return false;
+        }
+        Double keywordScore = chunk.getKeywordScore();
+        if (keywordScore != null && keywordScore >= 0.10d) {
+            return true;
+        }
+        return chunk.getMatchedTerms() != null && !chunk.getMatchedTerms().isEmpty();
+    }
+
+    private double scoreOf(Double score) {
+        return score == null || !Double.isFinite(score) ? 0.0d : score;
+    }
+
+    private record RetrievalGateDecision(boolean rejected, String reason) {
+        static RetrievalGateDecision pass() {
+            return new RetrievalGateDecision(false, "");
+        }
+
+        static RetrievalGateDecision reject(String reason) {
+            return new RetrievalGateDecision(true, reason);
+        }
     }
 
     private WorkflowNode buildSyntheticLlmNode(WorkflowNode node,

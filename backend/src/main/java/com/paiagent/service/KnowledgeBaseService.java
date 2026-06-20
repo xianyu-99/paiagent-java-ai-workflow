@@ -352,8 +352,7 @@ public class KnowledgeBaseService {
         int safeContextWindow = Math.max(0, Math.min(MAX_CONTEXT_WINDOW, contextWindow));
         int safeContextMaxChars = Math.max(MIN_CONTEXT_MAX_CHARS, Math.min(MAX_CONTEXT_MAX_CHARS, contextMaxChars));
         int candidateLimit = Math.max(safeTopK * 6, safeTopK + 12);
-        List<Double> queryEmbedding = textEmbeddingService.embed(query);
-        List<VectorSearchHit> vectorHits = knowledgeVectorStore.search(knowledgeBaseId, queryEmbedding, candidateLimit, 0.0);
+        List<VectorSearchHit> vectorHits = searchVectorCandidates(knowledgeBaseId, query, candidateLimit);
         List<KnowledgeChunk> keywordHits = searchKeywordCandidates(knowledgeBaseId, query, candidateLimit);
 
         Map<Long, RetrievalCandidate> candidates = new LinkedHashMap<>();
@@ -411,6 +410,15 @@ public class KnowledgeBaseService {
         return rankedCandidates.stream()
                 .map(this::toRetrievedChunk)
                 .toList();
+    }
+
+    private List<VectorSearchHit> searchVectorCandidates(Long knowledgeBaseId, String query, int candidateLimit) {
+        try {
+            List<Double> queryEmbedding = textEmbeddingService.embed(query);
+            return knowledgeVectorStore.search(knowledgeBaseId, queryEmbedding, candidateLimit, 0.0);
+        } catch (IllegalStateException e) {
+            return List.of();
+        }
     }
 
     public List<RetrievedChunk> retrieveAuthorized(Long knowledgeBaseId,

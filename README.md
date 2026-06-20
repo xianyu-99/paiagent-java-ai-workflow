@@ -115,21 +115,32 @@ curl -X POST "http://localhost:5174/api/published-workflows/{shareKey}/execute-a
 
 ### RAG Embedding 配置
 
-默认配置为本地 Hash Embedding，适合离线复现：
-
-```env
-RAG_EMBEDDING_PROVIDER=local
-```
-
-如果要切换为阿里云百炼真实语义向量，可以在 `backend/.env` 中配置：
+默认使用 DashScope `text-embedding-v4` 生成真实语义向量。API Key 会按以下顺序读取：
+`RAG_EMBEDDING_API_KEY -> Qwen_API_KEY -> QWEN_API_KEY -> DASHSCOPE_API_KEY -> API_KEY`。
 
 ```env
 RAG_EMBEDDING_PROVIDER=dashscope
 RAG_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-RAG_EMBEDDING_API_KEY=your_dashscope_api_key
 RAG_EMBEDDING_MODEL=text-embedding-v4
 RAG_EMBEDDING_DIMENSIONS=1024
 RAG_EMBEDDING_BATCH_SIZE=16
+```
+
+如果要显式指定阿里云百炼 Key，可以在 `backend/.env` 或根目录 `.env` 中配置：
+
+```env
+RAG_EMBEDDING_API_KEY=your_dashscope_api_key
+```
+
+查询链路支持 query embedding 本地缓存、外部 embedding 调用限流和 429 重试，可按需调整：
+
+```env
+RAG_EMBEDDING_CACHE_ENABLED=true
+RAG_EMBEDDING_CACHE_TTL_SECONDS=3600
+RAG_EMBEDDING_CACHE_MAX_SIZE=2048
+RAG_EMBEDDING_MAX_CONCURRENT_REQUESTS=4
+RAG_EMBEDDING_RATE_LIMIT_PERMITS_PER_SECOND=4
+RAG_EMBEDDING_RETRY_MAX_ATTEMPTS=3
 ```
 
 切换 Embedding Provider 或模型后，需要在前端 RAG 节点配置区点击“重建向量索引”，让历史知识库切片重新生成向量。
@@ -419,7 +430,25 @@ http://你的局域网IP:5173
 .\scripts\smoke-service-desk.ps1 -SkipBackendTests -SkipFrontendBuild
 ```
 
+脚本会在执行前检查默认服务台工作流的 LLM 节点。如果节点缺少 `configId / provider`，会从全局 LLM 配置中按 `deepseek, qwen, zhipu, openai, moonshot, mimo` 顺序选择可用配置并写回工作流，不会打印或写死 API Key。
+
 脚本会真实执行一次工作流，因此会新增一条执行记录；它不会删除数据库、volume 或工作流配置。
+
+### RAG 检索压测
+
+如果只验证 RAG retrieval-only 链路，不希望混入 LLM 生成耗时，可以运行：
+
+```powershell
+.\scripts\benchmark-rag.ps1 -Total 120 -Concurrency 12 -Scenario repeat-faq
+```
+
+也可以使用基本不命中 query embedding 缓存的场景，观察外部 embedding API 限流、排队和重试后的端到端耗时：
+
+```powershell
+.\scripts\benchmark-rag.ps1 -Total 60 -Concurrency 12 -Scenario mostly-uncached
+```
+
+脚本会自动登录、查找 `retrievalOnly=true` 的 RAG 工作流并输出 `success / failed / p50 / p95 / p99 / throughputRps` 等指标。当前本地 Docker 环境验证中，`repeat-faq` 场景 12 并发 120 次请求成功率 100%，P95 约 137ms；`mostly-uncached` 场景 12 并发 60 次请求成功率 100%，P95 约 5997ms。该结果只代表本地评测环境，不是生产 SLA。
 
 ## 已完成的增强
 
@@ -439,12 +468,13 @@ http://你的局域网IP:5173
 - 增加 Workflow Test Harness：支持工作流级测试用例、批量运行、关键词/RAG 引用/TTS 音频/耗时断言和历史结果记录
 - 增加工作流发布能力：支持公开页面、受 API Key 保护的正式调用接口和调用示例
 - 增加 Docker Compose、Dockerfile、Nginx 配置和部署文档
+- 增加 RAG 查询链路稳定性优化：query embedding 缓存、外部 embedding 调用令牌桶限流、429 指数退避重试和可复现 benchmark 脚本
 
 ## 当前边界
 
 - DAG 引擎是当前主要稳定路径，适合常规工作流执行
 - LangGraph4j 已支持条件分支和基础循环，但复杂 Agent 状态流、人工中断、检查点恢复仍属于后续增强方向
-- RAG 默认使用本地 Hash Embedding，适合演示和复现；已支持切换 DashScope Embedding，生产环境还可继续接入 BGE / OpenAI Embedding
+- RAG 默认使用 DashScope `text-embedding-v4`，需要配置可用 API Key；生产环境还可继续接入 BGE / OpenAI Embedding
 - RAG 使用 Qdrant 进行语义向量检索，搭配 MySQL 关键词匹配做 Hybrid 召回；超大规模知识库可继续升级 Milvus
 - RAG 已支持常见文档格式解析，但检索质量仍依赖 Embedding Provider、chunk 参数和知识库内容质量
 - 企业服务台 skill 支持本地结构化 demo fallback，用于无 LLM Key 的演示和验收；生产环境应接入真实 LLM Provider，并按企业知识源与权限重新配置

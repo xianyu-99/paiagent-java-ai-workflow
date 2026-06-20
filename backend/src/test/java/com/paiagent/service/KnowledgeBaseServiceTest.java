@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -76,6 +77,36 @@ class KnowledgeBaseServiceTest {
         assertTrue(retrieved.getContextContent().contains("这一段介绍知识库导入"));
         assertTrue(retrieved.getContextContent().contains("下一段介绍检索调试"));
         assertTrue(retrieved.getMatchedTerms().contains("知识库"));
+    }
+
+    @Test
+    void shouldFallbackToKeywordRetrievalWhenEmbeddingProviderIsUnavailable() {
+        KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
+        TextEmbeddingService embeddingService = mock(TextEmbeddingService.class);
+        KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
+        KnowledgeBaseService service = new KnowledgeBaseService(
+                mock(KnowledgeBaseMapper.class),
+                mock(KnowledgeDocumentMapper.class),
+                chunkMapper,
+                mock(KnowledgeImportTaskMapper.class),
+                embeddingService,
+                vectorStore,
+                mock(DocumentParsingService.class),
+                new RagRetrievalScorer(),
+                mock(ThreadPoolTaskExecutor.class)
+        );
+
+        KnowledgeChunk vpn = chunk(11L, 1L, 20L, 0, "VPN certificate reset guide");
+        when(embeddingService.embed("VPN certificate")).thenThrow(new IllegalStateException("missing api key"));
+        when(chunkMapper.selectList(any())).thenReturn(List.of(vpn));
+
+        List<RetrievedChunk> chunks = service.retrieve(1L, "VPN certificate", 1, 0.0, 0, 2000);
+
+        assertEquals(1, chunks.size());
+        assertEquals(11L, chunks.get(0).getChunkId());
+        assertEquals(0.0d, chunks.get(0).getVectorScore());
+        assertTrue(chunks.get(0).getKeywordScore() > 0.0d);
+        verify(vectorStore, never()).search(any(), any(), any(Integer.class), any(Double.class));
     }
 
     @Test

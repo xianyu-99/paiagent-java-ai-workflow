@@ -145,6 +145,8 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE knowledge_chunk ADD COLUMN end_offset INT NULL AFTER start_offset");
         addIndexIfMissing("knowledge_chunk", "idx_chunk_doc_page",
                 "ALTER TABLE knowledge_chunk ADD INDEX idx_chunk_doc_page (document_id, page_number, chunk_index)");
+        addIndexIfMissing("knowledge_chunk", "idx_chunk_fulltext",
+                "ALTER TABLE knowledge_chunk ADD FULLTEXT INDEX idx_chunk_fulltext (content, source_name, section_title)");
     }
 
     private void createKnowledgeImportTaskTable() {
@@ -576,8 +578,6 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                                        String sectionTitle,
                                        String content) {
         String normalizedContent = content.strip();
-        List<Double> embedding = textEmbeddingService.embed(normalizedContent);
-        String embeddingJson = textEmbeddingService.serialize(embedding);
         int tokenCount = Math.max(1, normalizedContent.length() / 4);
 
         Long existingDocumentId = jdbcTemplate.query("""
@@ -613,6 +613,45 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     documentId
             );
         }
+
+        if (existingDocumentId != null) {
+            Integer existingChunkCount = jdbcTemplate.queryForObject("""
+                            SELECT COUNT(*) FROM knowledge_chunk
+                            WHERE knowledge_base_id = ? AND document_id = ? AND chunk_index = 0 AND deleted = 0
+                            """,
+                    Integer.class,
+                    knowledgeBaseId,
+                    documentId
+            );
+            if (existingChunkCount != null && existingChunkCount > 0) {
+                jdbcTemplate.update("""
+                                UPDATE knowledge_chunk
+                                SET content = ?,
+                                    source_name = ?,
+                                    content_type = 'text/markdown',
+                                    section_title = ?,
+                                    start_offset = 0,
+                                    end_offset = ?,
+                                    token_count = ?
+                                WHERE knowledge_base_id = ?
+                                  AND document_id = ?
+                                  AND chunk_index = 0
+                                  AND deleted = 0
+                                """,
+                        normalizedContent,
+                        fileName,
+                        sectionTitle,
+                        normalizedContent.length(),
+                        tokenCount,
+                        knowledgeBaseId,
+                        documentId
+                );
+                return;
+            }
+        }
+
+        List<Double> embedding = textEmbeddingService.embed(normalizedContent);
+        String embeddingJson = textEmbeddingService.serialize(embedding);
 
         Integer chunkCount = jdbcTemplate.queryForObject("""
                         SELECT COUNT(*) FROM knowledge_chunk

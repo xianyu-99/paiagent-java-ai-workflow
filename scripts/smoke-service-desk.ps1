@@ -4,6 +4,7 @@ param(
     [string]$Username = "admin",
     [string]$Password = "admin123",
     [string]$InputText = "",
+    [string]$LlmProviderPreference = "deepseek,qwen,zhipu,openai,moonshot,mimo",
     [switch]$SkipBackendTests,
     [switch]$SkipFrontendBuild,
     [switch]$NoAutoStartBackend,
@@ -232,6 +233,133 @@ function Get-PropertyValue {
     return $property.Value
 }
 
+function Set-PropertyValue {
+    param(
+        [object]$Object,
+        [string]$Name,
+        [object]$Value
+    )
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        $Object | Add-Member -MemberType NoteProperty -Name $Name -Value $Value
+    }
+    else {
+        $property.Value = $Value
+    }
+}
+
+function ConvertFrom-WorkflowFlowData {
+    param([object]$FlowData)
+
+    if ($FlowData -is [string]) {
+        return $FlowData | ConvertFrom-Json
+    }
+
+    return $FlowData
+}
+
+function Select-LlmConfigForSmoke {
+    param(
+        [object[]]$Configs,
+        [string]$ProviderPreference
+    )
+
+    $available = @($Configs | Where-Object {
+        $null -ne (Get-PropertyValue $_ "id") -and
+        -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue $_ "provider")) -and
+        -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue $_ "model"))
+    })
+
+    if ($available.Count -eq 0) {
+        return $null
+    }
+
+    $providers = @($ProviderPreference -split "," | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ })
+    foreach ($provider in $providers) {
+        $candidates = @($available | Where-Object {
+            ([string](Get-PropertyValue $_ "provider")).Trim().ToLowerInvariant() -eq $provider
+        })
+        if ($candidates.Count -gt 0) {
+            $default = $candidates | Where-Object { [int](Get-PropertyValue $_ "isDefault") -eq 1 } | Select-Object -First 1
+            if ($null -ne $default) {
+                return $default
+            }
+            return $candidates | Select-Object -First 1
+        }
+    }
+
+    $defaultAny = $available | Where-Object { [int](Get-PropertyValue $_ "isDefault") -eq 1 } | Select-Object -First 1
+    if ($null -ne $defaultAny) {
+        return $defaultAny
+    }
+    return $available | Select-Object -First 1
+}
+
+function Ensure-WorkflowLlmConfig {
+    param(
+        [object]$Workflow,
+        [hashtable]$Headers
+    )
+
+    $flow = ConvertFrom-WorkflowFlowData -FlowData $Workflow.flowData
+    $llmNodes = @($flow.nodes | Where-Object {
+        $nodeType = [string](Get-PropertyValue $_ "type")
+        $data = Get-PropertyValue $_ "data"
+        $dataType = [string](Get-PropertyValue $data "type")
+        $nodeType -eq "llm" -or $dataType -eq "llm"
+    })
+
+    if ($llmNodes.Count -eq 0) {
+        return $Workflow
+    }
+
+    $missingConfig = @($llmNodes | Where-Object {
+        $data = Get-PropertyValue $_ "data"
+        $configId = Get-PropertyValue $data "configId"
+        $provider = [string](Get-PropertyValue $data "provider")
+        $null -eq $configId -and [string]::IsNullOrWhiteSpace($provider)
+    })
+
+    if ($missingConfig.Count -eq 0) {
+        return $Workflow
+    }
+
+    $configResult = Invoke-JsonApi -Path "/api/llm-config" -Method "GET" -Headers $Headers
+    Assert-ResultCode -Result $configResult -Operation "List LLM configs"
+    $selectedConfig = Select-LlmConfigForSmoke -Configs @($configResult.data) -ProviderPreference $LlmProviderPreference
+    if ($null -eq $selectedConfig) {
+        throw "No usable LLM global config found. Add one in /api/llm-config before running smoke."
+    }
+
+    foreach ($node in $missingConfig) {
+        $data = Get-PropertyValue $node "data"
+        if ($null -eq $data) {
+            $data = [PSCustomObject]@{}
+            Set-PropertyValue -Object $node -Name "data" -Value $data
+        }
+        Set-PropertyValue -Object $data -Name "configId" -Value ([long](Get-PropertyValue $selectedConfig "id"))
+        Set-PropertyValue -Object $data -Name "provider" -Value ([string](Get-PropertyValue $selectedConfig "provider"))
+        Set-PropertyValue -Object $data -Name "apiUrl" -Value ([string](Get-PropertyValue $selectedConfig "apiUrl"))
+        Set-PropertyValue -Object $data -Name "model" -Value ([string](Get-PropertyValue $selectedConfig "model"))
+        if ($null -ne (Get-PropertyValue $selectedConfig "temperature")) {
+            Set-PropertyValue -Object $data -Name "temperature" -Value (Get-PropertyValue $selectedConfig "temperature")
+        }
+    }
+
+    $flowJson = $flow | ConvertTo-Json -Depth 80 -Compress
+    $updateResult = Invoke-JsonApi -Path "/api/workflows/$($Workflow.id)" -Method "PUT" -Headers $Headers -Body @{
+        name = $Workflow.name
+        description = $Workflow.description
+        flowData = $flowJson
+        engineType = $Workflow.engineType
+    }
+    Assert-ResultCode -Result $updateResult -Operation "Patch workflow LLM config"
+
+    Write-Host "Patched LLM config for workflow $($Workflow.id): provider=$([string](Get-PropertyValue $selectedConfig 'provider')), configId=$([long](Get-PropertyValue $selectedConfig 'id')), model=$([string](Get-PropertyValue $selectedConfig 'model'))"
+    return $updateResult.data
+}
+
 function Assert-ServiceDeskPayload {
     param([object]$OutputData)
 
@@ -346,6 +474,10 @@ try {
         $names = @($workflows | ForEach-Object { "$($_.id):$($_.name)" }) -join ", "
         throw "Workflow '$WorkflowName' not found. Visible workflows: $names"
     }
+
+    $workflowDetailResult = Invoke-JsonApi -Path "/api/workflows/$($workflow.id)" -Method "GET" -Headers $headers
+    Assert-ResultCode -Result $workflowDetailResult -Operation "Get workflow detail"
+    $workflow = Ensure-WorkflowLlmConfig -Workflow $workflowDetailResult.data -Headers $headers
 
     Write-Step "Execute service desk workflow"
     $executeResult = Invoke-JsonApi -Path "/api/workflows/$($workflow.id)/execute" -Method "POST" -Headers $headers -Body @{

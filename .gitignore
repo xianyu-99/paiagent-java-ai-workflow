@@ -43,3 +43,8 @@ Thumbs.db
 # 临时文件
 *.tmp
 *.temp
+
+# 本地数据
+downloads/
+.reasonix/
+tools/

@@ -3,11 +3,15 @@ package com.paiagent.engine.executor.impl;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.paiagent.dto.RetrievedChunk;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RagNodeExecutorTest {
 
@@ -61,6 +65,32 @@ class RagNodeExecutorTest {
         String question = ReflectionTestUtils.invokeMethod(executor, "resolveQuestion", data, Map.of("input", "raw question"));
 
         assertEquals("raw question", question);
+    }
+
+    @Test
+    void shouldPassNearThresholdRetrievalWhenKeywordEvidenceExists() {
+        RagNodeExecutor executor = new RagNodeExecutor(null);
+        RetrievedChunk chunk = new RetrievedChunk();
+        chunk.setScore(0.42d);
+        chunk.setKeywordScore(0.31d);
+        chunk.setMatchedTerms(List.of("VPN", "certificate"));
+
+        Object decision = ReflectionTestUtils.invokeMethod(executor, "evaluateRetrievalGate", List.of(chunk), 0.5d);
+
+        assertFalse((Boolean) ReflectionTestUtils.invokeMethod(decision, "rejected"));
+    }
+
+    @Test
+    void shouldRejectLowScoreRetrievalWithoutKeywordEvidence() {
+        RagNodeExecutor executor = new RagNodeExecutor(null);
+        RetrievedChunk chunk = new RetrievedChunk();
+        chunk.setScore(0.31d);
+        chunk.setKeywordScore(0.0d);
+        chunk.setMatchedTerms(List.of());
+
+        Object decision = ReflectionTestUtils.invokeMethod(executor, "evaluateRetrievalGate", List.of(chunk), 0.5d);
+
+        assertTrue((Boolean) ReflectionTestUtils.invokeMethod(decision, "rejected"));
     }
 
     private Map<String, Object> questionReference(String reference) {

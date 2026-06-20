@@ -94,24 +94,29 @@ class WorkflowEngineConditionTest {
         List<WorkflowNode> nodes = new ArrayList<>();
         nodes.add(node("input-default", "input", Map.of("label", "输入", "type", "input")));
 
-        Map<String, Object> llmData = new HashMap<>();
-        llmData.put("label", "LLM 生成服务台答案");
-        llmData.put("type", "llm");
-        llmData.put("skillName", "service-desk-answer");
-        llmData.put("prompt", "请输出企业服务台结构化 JSON。");
-        llmData.put("inputParams", List.of(
-                Map.of("name", "question", "type", "reference", "referenceNode", "input-default.input")
+        Map<String, Object> businessPayload = new HashMap<>();
+        businessPayload.put("answer", "Please create a support ticket.");
+        businessPayload.put("citations", List.of("VPN SOP"));
+        businessPayload.put("confidence", 0.42d);
+        businessPayload.put("resolved", false);
+        businessPayload.put("nextAction", "create_ticket");
+        businessPayload.put("ticketSummary", "VPN certificate expired.");
+        businessPayload.put("escalationReason", "Need manual certificate reset.");
+
+        Map<String, Object> payloadData = new HashMap<>();
+        payloadData.put("label", "Business payload");
+        payloadData.put("type", "output");
+        payloadData.put("outputParams", List.of(
+                Map.of("name", "answerPayload", "type", "input", "value", businessPayload)
         ));
-        llmData.put("outputParams", List.of(
-                Map.of("name", "output", "type", "object")
-        ));
-        nodes.add(node("llm-service-desk", "llm", llmData));
+        payloadData.put("responseContent", "{{answerPayload}}");
+        nodes.add(node("business-payload", "output", payloadData));
 
         Map<String, Object> outputData = new HashMap<>();
         outputData.put("label", "Output 业务对象");
         outputData.put("type", "output");
         outputData.put("outputParams", List.of(
-                Map.of("name", "answerPayload", "type", "reference", "referenceNode", "llm-service-desk.output")
+                Map.of("name", "answerPayload", "type", "reference", "referenceNode", "business-payload.output")
         ));
         outputData.put("responseContent", "{{answerPayload}}");
         nodes.add(node("output-service-desk", "output", outputData));
@@ -119,8 +124,8 @@ class WorkflowEngineConditionTest {
         WorkflowConfig config = new WorkflowConfig();
         config.setNodes(nodes);
         config.setEdges(List.of(
-                edge("e1", "input-default", "llm-service-desk", null),
-                edge("e2", "llm-service-desk", "output-service-desk", null)
+                edge("e1", "input-default", "business-payload", null),
+                edge("e2", "business-payload", "output-service-desk", null)
         ));
         return config;
     }

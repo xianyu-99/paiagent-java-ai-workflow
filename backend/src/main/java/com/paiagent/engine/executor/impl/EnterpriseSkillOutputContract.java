@@ -1,5 +1,8 @@
 package com.paiagent.engine.executor.impl;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONException;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,9 +39,14 @@ final class EnterpriseSkillOutputContract {
             return parsedContent;
         }
 
-        if (!(parsedContent instanceof Map<?, ?> source)) {
+        Object enterpriseContent = parsedContent instanceof Map<?, ?>
+                ? parsedContent
+                : parseRawJsonObject(rawContent);
+
+        if (!(enterpriseContent instanceof Map<?, ?> source)) {
             return fallback(rawContent);
         }
+        source = unwrapOutput(source);
 
         Map<String, Object> normalized = copyStringKeyEntries(source);
         boolean complete = true;
@@ -127,6 +135,69 @@ final class EnterpriseSkillOutputContract {
         return copy;
     }
 
+    private static Map<?, ?> unwrapOutput(Map<?, ?> source) {
+        Object nestedOutput = source.get("output");
+        if (nestedOutput instanceof Map<?, ?> nested) {
+            return nested;
+        }
+        return source;
+    }
+
+    private static Object parseRawJsonObject(String rawContent) {
+        String jsonObject = extractJsonObject(rawContent);
+        if (jsonObject == null) {
+            return null;
+        }
+        try {
+            return JSON.parseObject(jsonObject, Map.class);
+        } catch (JSONException e) {
+            return null;
+        }
+    }
+
+    private static String extractJsonObject(String rawContent) {
+        if (rawContent == null) {
+            return null;
+        }
+
+        String text = rawContent.trim();
+        int start = text.indexOf('{');
+        if (start < 0) {
+            return null;
+        }
+
+        boolean inString = false;
+        boolean escaped = false;
+        int depth = 0;
+        for (int i = start; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (ch == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (ch == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) {
+                continue;
+            }
+            if (ch == '{') {
+                depth++;
+            } else if (ch == '}') {
+                depth--;
+                if (depth == 0) {
+                    return text.substring(start, i + 1);
+                }
+            }
+        }
+        return null;
+    }
+
     private static String stringValue(Object value) {
         if (!(value instanceof CharSequence text)) {
             return null;
@@ -138,19 +209,48 @@ final class EnterpriseSkillOutputContract {
         if (value instanceof Iterable<?> values) {
             List<String> citations = new ArrayList<>();
             for (Object citation : values) {
-                String text = stringValue(citation);
+                String text = citationText(citation);
                 if (text != null && !text.isBlank()) {
                     citations.add(text);
                 }
             }
-            return new CitationValue(List.copyOf(citations), true);
+            return new CitationValue(List.copyOf(citations), !citations.isEmpty());
         }
 
-        String citation = stringValue(value);
+        String citation = citationText(value);
         if (citation != null && !citation.isBlank()) {
             return new CitationValue(List.of(citation), true);
         }
         return new CitationValue(List.of(), false);
+    }
+
+    private static String citationText(Object value) {
+        String text = stringValue(value);
+        if (text != null) {
+            return text;
+        }
+        if (value instanceof Map<?, ?> map) {
+            List<String> parts = new ArrayList<>();
+            addCitationPart(parts, map.get("ref"));
+            addCitationPart(parts, map.get("sourceName"));
+            addCitationPart(parts, map.get("sectionTitle"));
+            addCitationPart(parts, map.get("pageNumber"));
+            if (!parts.isEmpty()) {
+                return String.join(" ", parts);
+            }
+            return JSON.toJSONString(map);
+        }
+        return null;
+    }
+
+    private static void addCitationPart(List<String> parts, Object value) {
+        if (value == null) {
+            return;
+        }
+        String text = String.valueOf(value).trim();
+        if (!text.isBlank()) {
+            parts.add(text);
+        }
     }
 
     private static ConfidenceValue confidenceValue(Object value) {

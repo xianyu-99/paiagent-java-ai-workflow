@@ -76,6 +76,70 @@ class EnterpriseSkillOutputContractTest {
     }
 
     @Test
+    void shouldRepairEnterpriseJsonWrappedInMarkdownText() {
+        String rawContent = """
+                Here is the answer:
+                ```json
+                {
+                  "answer": "Reset your VPN certificate and reconnect.",
+                  "citations": ["VPN SOP"],
+                  "confidence": 0.82,
+                  "resolved": true,
+                  "nextAction": "direct_answer",
+                  "ticketSummary": "",
+                  "escalationReason": ""
+                }
+                ```
+                """;
+
+        Map<?, ?> normalized = normalize(EnterpriseSkillOutputContract.SERVICE_DESK_ANSWER, rawContent);
+
+        assertEquals("Reset your VPN certificate and reconnect.", normalized.get("answer"));
+        assertEquals(List.of("VPN SOP"), normalized.get("citations"));
+        assertEquals(0.82d, normalized.get("confidence"));
+        assertEquals(true, normalized.get("resolved"));
+        assertEquals(EnterpriseSkillOutputContract.DIRECT_ANSWER, normalized.get("nextAction"));
+    }
+
+    @Test
+    void shouldNormalizeCitationObjectsReturnedByRagPrompt() {
+        Map<?, ?> normalized = normalize(EnterpriseSkillOutputContract.SERVICE_DESK_ANSWER, Map.of(
+                "answer", "Submit the invoice and approval screenshot.",
+                "citations", List.of(
+                        Map.of("ref", "source1", "sourceName", "expense-policy.md", "sectionTitle", "Invoice reimbursement"),
+                        "finance-faq.md"
+                ),
+                "confidence", 0.78d,
+                "resolved", true,
+                "nextAction", EnterpriseSkillOutputContract.DIRECT_ANSWER,
+                "ticketSummary", "",
+                "escalationReason", ""
+        ));
+
+        assertEquals(List.of("source1 expense-policy.md Invoice reimbursement", "finance-faq.md"),
+                normalized.get("citations"));
+        assertEquals(true, normalized.get("resolved"));
+        assertEquals(EnterpriseSkillOutputContract.DIRECT_ANSWER, normalized.get("nextAction"));
+    }
+
+    @Test
+    void shouldNotDirectAnswerWhenCitationsAreEmpty() {
+        Map<?, ?> normalized = normalize(EnterpriseSkillOutputContract.SERVICE_DESK_ANSWER, Map.of(
+                "answer", "Use the standard onboarding checklist.",
+                "citations", List.of(),
+                "confidence", 0.91d,
+                "resolved", true,
+                "nextAction", EnterpriseSkillOutputContract.DIRECT_ANSWER,
+                "ticketSummary", "",
+                "escalationReason", ""
+        ));
+
+        assertEquals(List.of(), normalized.get("citations"));
+        assertEquals(false, normalized.get("resolved"));
+        assertEquals(EnterpriseSkillOutputContract.CREATE_TICKET, normalized.get("nextAction"));
+    }
+
+    @Test
     void shouldCoverAllEnterpriseSkillsAndDowngradeContradictoryDirectAction() {
         assertTrue(EnterpriseSkillOutputContract.supports(EnterpriseSkillOutputContract.SERVICE_DESK_ANSWER));
         assertTrue(EnterpriseSkillOutputContract.supports(EnterpriseSkillOutputContract.SUPPORT_TICKET_ASSISTANT));

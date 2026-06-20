@@ -77,6 +77,16 @@ services:
       APP_AUTH_DEFAULT_USERNAME: ${APP_AUTH_DEFAULT_USERNAME:-admin}
       APP_AUTH_DEFAULT_PASSWORD: ${APP_AUTH_DEFAULT_PASSWORD:-admin123}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-sk-placeholder}
+      RAG_EMBEDDING_PROVIDER: ${RAG_EMBEDDING_PROVIDER:-dashscope}
+      RAG_EMBEDDING_BASE_URL: ${RAG_EMBEDDING_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      RAG_EMBEDDING_API_KEY: ${RAG_EMBEDDING_API_KEY:-}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-text-embedding-v4}
+      RAG_EMBEDDING_DIMENSIONS: ${RAG_EMBEDDING_DIMENSIONS:-1024}
+      API_KEY: ${API_KEY:-}
+      Qwen_API_KEY: ${Qwen_API_KEY:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      ZHIPUAPI: ${ZHIPUAPI:-}
       MIMO_API_KEY: ${MIMO_API_KEY:-}
       MIMO_API_URL: ${MIMO_API_URL:-https://token-plan-cn.xiaomimimo.com/v1}
       MIMO_MODEL: ${MIMO_MODEL:-mimo-v2.5-pro}

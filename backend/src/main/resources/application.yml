@@ -109,11 +109,19 @@ paiagent:
     embedding:
       provider: ${RAG_EMBEDDING_PROVIDER:dashscope}
       base-url: ${RAG_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
-      api-key: ${RAG_EMBEDDING_API_KEY:}
+      api-key: ${RAG_EMBEDDING_API_KEY:${Qwen_API_KEY:${QWEN_API_KEY:${DASHSCOPE_API_KEY:${API_KEY:}}}}}
       model: ${RAG_EMBEDDING_MODEL:text-embedding-v4}
       dimensions: ${RAG_EMBEDDING_DIMENSIONS:1024}
       timeout-ms: ${RAG_EMBEDDING_TIMEOUT_MS:30000}
       batch-size: ${RAG_EMBEDDING_BATCH_SIZE:16}
+      cache-enabled: ${RAG_EMBEDDING_CACHE_ENABLED:true}
+      cache-ttl-seconds: ${RAG_EMBEDDING_CACHE_TTL_SECONDS:3600}
+      cache-max-size: ${RAG_EMBEDDING_CACHE_MAX_SIZE:2048}
+      max-concurrent-requests: ${RAG_EMBEDDING_MAX_CONCURRENT_REQUESTS:4}
+      rate-limit-permits-per-second: ${RAG_EMBEDDING_RATE_LIMIT_PERMITS_PER_SECOND:4}
+      retry-max-attempts: ${RAG_EMBEDDING_RETRY_MAX_ATTEMPTS:3}
+      retry-initial-backoff-ms: ${RAG_EMBEDDING_RETRY_INITIAL_BACKOFF_MS:300}
+      retry-max-backoff-ms: ${RAG_EMBEDDING_RETRY_MAX_BACKOFF_MS:2000}
     vector-store:
       qdrant-url: ${QDRANT_URL:http://localhost:6333}
       qdrant-api-key: ${QDRANT_API_KEY:}
