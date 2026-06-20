@@ -1,0 +1,101 @@
+# PaiAgent domain dictionary for Chinese word segmentation
+# Format: word [freq] [tag]
+# These terms improve jieba segmentation accuracy for enterprise RAG use cases.
+
+# IT Service Desk / 企业服务台
+服务台 10 n
+工单 10 n
+升级工单 8 n
+派单 8 v
+服务水平协议 10 n
+服务级别协议 8 n
+SLA 10 n
+KPI 10 n
+ITSM 10 n
+知识库 10 n
+自助服务 8 n
+工单系统 8 n
+
+# Troubleshooting / 故障处理
+故障处理 10 n
+告警 8 n
+预警 8 n
+根因分析 10 n
+业务影响 8 n
+应急预案 10 n
+灾难恢复 10 n
+降级方案 8 n
+问题单 8 n
+变更管理 8 n
+发布管理 8 n
+
+# Network & VPN / 网络
+VPN 10 n
+专线 8 n
+防火墙 8 n
+堡垒机 8 n
+负载均衡 8 n
+DNS解析 8 n
+网络连通性 8 n
+路由器 6 n
+交换机 6 n
+
+# Auth & Security / 认证与安全
+多因子认证 10 n
+MFA 10 n
+SSO 8 n
+LDAP 8 n
+OAuth 8 n
+令牌 6 n
+访问控制 8 n
+权限管理 8 n
+
+# HR / 人事
+差旅报销 10 n
+年假 8 n
+病假 6 n
+事假 6 n
+加班调休 8 n
+工资单 6 n
+社保公积金 8 n
+入职办理 8 n
+离职审批 8 n
+绩效评估 8 n
+OKR 8 n
+
+# Software / 软件
+PaiAgent 10 n
+数据库连接池 8 n
+消息队列 8 n
+微服务 8 n
+容器化 8 n
+CI/CD 8 n
+DevOps 8 n
+
+# Multi-vendor / 多供应商
+OpenAI 10 n
+DeepSeek 10 n
+Qwen 10 n
+通义千问 10 n
+ChatGPT 10 n
+百炼 8 n
+春申 8 n
+
+# Financial / 财务
+采购审批 8 n
+合同管理 8 n
+发票 6 n
+支付网关 8 n
+预算管理 8 n
+成本中心 8 n
+
+# Common RAG terms / RAG 常用
+向量检索 10 n
+语义搜索 8 n
+数据清洗 8 n
+文档解析 8 n
+文本切片 8 n
+Embedding 8 n
+Rerank 8 n
+Token 8 n
+Chunk 8 n

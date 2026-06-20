@@ -51,3 +51,6 @@ tools/
 
 # Python
 __pycache__/
+
+# Windows
+nul

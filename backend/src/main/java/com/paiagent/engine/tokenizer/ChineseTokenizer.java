@@ -29,6 +29,8 @@ public class ChineseTokenizer {
 
     private static final Logger log = LoggerFactory.getLogger(ChineseTokenizer.class);
 
+    private static final String DEFAULT_DOMAIN_DICT = "classpath:domain-dict.txt";
+
     private final JiebaSegmenter segmenter;
 
     private final Set<String> stopWords;
@@ -42,6 +44,22 @@ public class ChineseTokenizer {
         this.stopWords = parseStopWords(stopWordsConfig);
         this.maxSearchTerms = maxSearchTerms;
         log.info("ChineseTokenizer initialized: stopWords={}, maxSearchTerms={}", stopWords.size(), maxSearchTerms);
+    }
+
+    @jakarta.annotation.PostConstruct
+    public void init() {
+        try {
+            try (InputStream is = getClass().getClassLoader().getResourceAsStream("domain-dict.txt")) {
+                if (is != null) {
+                    loadUserDict(is);
+                    log.info("Loaded domain dictionary from classpath:domain-dict.txt");
+                } else {
+                    log.info("No domain dictionary found at classpath:domain-dict.txt, using jieba default");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load domain dictionary: {}", e.getMessage());
+        }
     }
 
     /**

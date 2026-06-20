@@ -34,7 +34,7 @@ public class LLMReranker implements Reranker {
     private static final Logger log = LoggerFactory.getLogger(LLMReranker.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final Pattern JSON_ARRAY_PATTERN = Pattern.compile(
-            "\\[\\s*([\\d.]+)\\s*(?:,\\s*([\\d.]+)\\s*)*]", Pattern.DOTALL);
+            "\\[\\s*((?:[\\d.]+(?:\\s*,\\s*[\\d.]+)*))\\s*]", Pattern.DOTALL);
 
     private static final String DEFAULT_LLM_URL =
             "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions";
@@ -151,15 +151,18 @@ public class LLMReranker implements Reranker {
         } catch (Exception ignored) {}
         Matcher m = JSON_ARRAY_PATTERN.matcher(response);
         if (m.find()) {
-            List<Double> scores = new ArrayList<>();
-            for (int i = 0; i < m.groupCount(); i++) {
-                String g = m.group(i + 1);
-                if (g != null) {
-                    try { scores.add(Double.parseDouble(g)); }
-                    catch (NumberFormatException ignored) { scores.add(0.0); }
+            String captured = m.group(1);
+            if (captured != null && !captured.isEmpty()) {
+                List<Double> scores = new ArrayList<>();
+                for (String part : captured.split("\\s*,\\s*")) {
+                    part = part.trim();
+                    if (!part.isEmpty()) {
+                        try { scores.add(Double.parseDouble(part)); }
+                        catch (NumberFormatException ignored) { scores.add(0.0); }
+                    }
                 }
+                return scores;
             }
-            return scores;
         }
         return List.of();
     }

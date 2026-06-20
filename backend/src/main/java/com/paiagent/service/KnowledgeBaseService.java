@@ -9,6 +9,10 @@ import com.paiagent.dto.KnowledgeDocumentResponse;
 import com.paiagent.dto.KnowledgeImportTaskResponse;
 import com.paiagent.dto.KnowledgeReindexResponse;
 import com.paiagent.dto.RetrievedChunk;
+import com.paiagent.engine.rerank.Reranker;
+import com.paiagent.engine.rerank.RerankerFactory;
+import com.paiagent.engine.retrieval.BM25Scorer;
+import com.paiagent.engine.retrieval.HybridRetriever;
 import com.paiagent.entity.KnowledgeBase;
 import com.paiagent.entity.KnowledgeChunk;
 import com.paiagent.entity.KnowledgeDocument;
@@ -24,6 +28,7 @@ import com.paiagent.service.rag.RagRetrievalScorer;
 import com.paiagent.service.rag.RetrievalCandidate;
 import com.paiagent.service.vector.KnowledgeVectorStore;
 import com.paiagent.service.vector.VectorSearchHit;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
@@ -33,6 +38,7 @@ import com.baomidou.mybatisplus.extension.toolkit.Db;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,6 +47,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 public class KnowledgeBaseService {
 
@@ -62,6 +69,13 @@ public class KnowledgeBaseService {
 
     private static final int MAX_CONTEXT_MAX_CHARS = 6000;
 
+    /**
+     * Score threshold applied at the (post-fusion / post-rerank) stage.
+     * The vector recall stage intentionally uses score_threshold=0 so that
+     * keyword-only matches (vectorScore=0) are not dropped before fusion.
+     */
+    private static final double VECTOR_RECALL_SCORE_THRESHOLD = 0.0;
+
     private final KnowledgeBaseMapper knowledgeBaseMapper;
 
     private final KnowledgeDocumentMapper knowledgeDocumentMapper;
@@ -80,6 +94,12 @@ public class KnowledgeBaseService {
 
     private final ThreadPoolTaskExecutor ragImportTaskExecutor;
 
+    private final HybridRetriever hybridRetriever;
+
+    private final BM25Scorer bm25Scorer;
+
+    private final RerankerFactory rerankerFactory;
+
     public KnowledgeBaseService(KnowledgeBaseMapper knowledgeBaseMapper,
                                 KnowledgeDocumentMapper knowledgeDocumentMapper,
                                 KnowledgeChunkMapper knowledgeChunkMapper,
@@ -88,7 +108,10 @@ public class KnowledgeBaseService {
                                 KnowledgeVectorStore knowledgeVectorStore,
                                 DocumentParsingService documentParsingService,
                                 RagRetrievalScorer ragRetrievalScorer,
-                                @Qualifier("ragImportTaskExecutor") ThreadPoolTaskExecutor ragImportTaskExecutor) {
+                                @Qualifier("ragImportTaskExecutor") ThreadPoolTaskExecutor ragImportTaskExecutor,
+                                org.springframework.beans.factory.ObjectProvider<HybridRetriever> hybridRetrieverProvider,
+                                org.springframework.beans.factory.ObjectProvider<BM25Scorer> bm25ScorerProvider,
+                                org.springframework.beans.factory.ObjectProvider<RerankerFactory> rerankerFactoryProvider) {
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.knowledgeDocumentMapper = knowledgeDocumentMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
@@ -98,6 +121,38 @@ public class KnowledgeBaseService {
         this.documentParsingService = documentParsingService;
         this.ragRetrievalScorer = ragRetrievalScorer;
         this.ragImportTaskExecutor = ragImportTaskExecutor;
+        this.hybridRetriever = hybridRetrieverProvider.getIfAvailable();
+        this.bm25Scorer = bm25ScorerProvider.getIfAvailable();
+        this.rerankerFactory = rerankerFactoryProvider.getIfAvailable();
+    }
+
+    /**
+     * Legacy constructor used by unit tests that pre-date the industrial retrieval pipeline.
+     * RRF and rerank dependencies are null, so {@link #rankCandidates} transparently falls
+     * back to the linear fusion path. This keeps existing tests compiling and green without
+     * forcing every test to mock the new collaborators.
+     */
+    public KnowledgeBaseService(KnowledgeBaseMapper knowledgeBaseMapper,
+                                KnowledgeDocumentMapper knowledgeDocumentMapper,
+                                KnowledgeChunkMapper knowledgeChunkMapper,
+                                KnowledgeImportTaskMapper knowledgeImportTaskMapper,
+                                TextEmbeddingService textEmbeddingService,
+                                KnowledgeVectorStore knowledgeVectorStore,
+                                DocumentParsingService documentParsingService,
+                                RagRetrievalScorer ragRetrievalScorer,
+                                ThreadPoolTaskExecutor ragImportTaskExecutor) {
+        this.knowledgeBaseMapper = knowledgeBaseMapper;
+        this.knowledgeDocumentMapper = knowledgeDocumentMapper;
+        this.knowledgeChunkMapper = knowledgeChunkMapper;
+        this.knowledgeImportTaskMapper = knowledgeImportTaskMapper;
+        this.textEmbeddingService = textEmbeddingService;
+        this.knowledgeVectorStore = knowledgeVectorStore;
+        this.documentParsingService = documentParsingService;
+        this.ragRetrievalScorer = ragRetrievalScorer;
+        this.ragImportTaskExecutor = ragImportTaskExecutor;
+        this.hybridRetriever = null;
+        this.bm25Scorer = null;
+        this.rerankerFactory = null;
     }
 
     public List<KnowledgeBaseResponse> listKnowledgeBases(Long userId, boolean admin) {
@@ -391,21 +446,8 @@ public class KnowledgeBaseService {
             }
         }
 
-        List<RetrievalCandidate> rankedCandidates = candidates.values().stream()
-                .filter(candidate -> candidate.chunk() != null)
-                .peek(candidate -> {
-                    if (candidate.keywordScore() == null) {
-                        candidate.keywordScore(ragRetrievalScorer.keywordScore(query, candidate.chunk()));
-                    }
-                    candidate.rerankScore(ragRetrievalScorer.rerankScore(
-                            candidate.vectorScore() == null ? 0.0 : candidate.vectorScore(),
-                            candidate.keywordScore() == null ? 0.0 : candidate.keywordScore()
-                    ));
-                })
-                .filter(candidate -> candidate.rerankScore() >= minScore)
-                .sorted((left, right) -> Double.compare(right.rerankScore(), left.rerankScore()))
-                .limit(safeTopK)
-                .toList();
+        List<RetrievalCandidate> rankedCandidates = rankCandidates(
+                query, candidates, minScore, safeTopK);
 
         enrichRetrievedCandidates(rankedCandidates, query, safeContextWindow, safeContextMaxChars);
         return rankedCandidates.stream()
@@ -416,10 +458,156 @@ public class KnowledgeBaseService {
     private List<VectorSearchHit> searchVectorCandidates(Long knowledgeBaseId, String query, int candidateLimit) {
         try {
             List<Double> queryEmbedding = textEmbeddingService.embed(query);
-            return knowledgeVectorStore.search(knowledgeBaseId, queryEmbedding, candidateLimit, 0.0);
+            // Recall stage intentionally uses a zero threshold: fusion/rerank stage applies minScore.
+            // Otherwise keyword-only hits (vectorScore=0) would be dropped before they can be rescued.
+            return knowledgeVectorStore.search(knowledgeBaseId, queryEmbedding, candidateLimit, VECTOR_RECALL_SCORE_THRESHOLD);
         } catch (IllegalStateException e) {
             return List.of();
         }
+    }
+
+    /**
+     * Rank retrieval candidates using the industrial pipeline when available:
+     * <ol>
+     *   <li>Fuse dense (vector) and sparse (BM25) ranks via Reciprocal Rank Fusion (RRF).</li>
+     *   <li>Re-score the fused candidates with a Cross-Encoder Reranker (DashScope gte-rerank,
+     *       LLM-judge fallback), if a reranker is available.</li>
+     *   <li>Apply minScore as a post-fusion / post-rerank threshold, then truncate to topK.</li>
+     * </ol>
+     * Falls back to the legacy linear fusion (0.65·vector + 0.35·keyword) when the RRF/rerank
+     * components are absent, preserving the pre-industrial behavior for unit tests.
+     */
+    private List<RetrievalCandidate> rankCandidates(String query,
+                                                    Map<Long, RetrievalCandidate> candidates,
+                                                    double minScore,
+                                                    int topK) {
+        List<RetrievalCandidate> materialized = candidates.values().stream()
+                .filter(candidate -> candidate.chunk() != null)
+                .peek(candidate -> {
+                    if (candidate.keywordScore() == null) {
+                        candidate.keywordScore(ragRetrievalScorer.keywordScore(query, candidate.chunk()));
+                    }
+                })
+                .toList();
+
+        if (materialized.isEmpty()) {
+            return List.of();
+        }
+
+        boolean canUseIndustrialPipeline = hybridRetriever != null
+                && rerankerFactory != null
+                && rerankerFactory.getReranker().isAvailable();
+
+        if (canUseIndustrialPipeline) {
+            return rankWithRrfAndRerank(query, materialized, minScore, topK);
+        }
+        return rankWithLegacyLinearFusion(query, materialized, minScore, topK);
+    }
+
+    /**
+     * Industrial ranking: RRF fusion → Cross-Encoder rerank → threshold → topK.
+     */
+    private List<RetrievalCandidate> rankWithRrfAndRerank(String query,
+                                                          List<RetrievalCandidate> materialized,
+                                                          double minScore,
+                                                          int topK) {
+        // 1. Build dense / sparse rank inputs from the materialized candidates.
+        //    Dense ranks by vector score; sparse ranks by BM25 (when available) or keyword score.
+        Map<Long, Double> denseScores = new LinkedHashMap<>();
+        Map<Long, Double> sparseScores = new LinkedHashMap<>();
+        boolean useBm25 = bm25Scorer != null;
+        Map<Long, Double> bm25Scores = useBm25
+                ? bm25Scorer.scoreBatch(query, materialized.stream().map(RetrievalCandidate::chunk).toList())
+                : Collections.emptyMap();
+
+        for (RetrievalCandidate candidate : materialized) {
+            denseScores.put(candidate.chunkId(),
+                    candidate.vectorScore() == null ? 0.0 : candidate.vectorScore());
+            double sparse = useBm25
+                    ? bm25Scores.getOrDefault(candidate.chunkId(), 0.0)
+                    : (candidate.keywordScore() == null ? 0.0 : candidate.keywordScore());
+            sparseScores.put(candidate.chunkId(), sparse);
+            if (useBm25 && candidate.keywordScore() != null) {
+                candidate.keywordScore(candidate.keywordScore());
+            }
+        }
+
+        Map<Long, Double> denseSorted = sortByValueDescending(denseScores);
+        Map<Long, Double> sparseSorted = sortByValueDescending(sparseScores);
+
+        // 2. RRF fusion. We fuse over a generous candidate window so the reranker has room to work.
+        int fusionWindow = Math.max(topK * 4, topK + 10);
+        Map<Long, Double> fused = hybridRetriever.fuse(denseSorted, sparseSorted, fusionWindow);
+
+        // Preserve fusion score on each candidate and order by it.
+        List<RetrievalCandidate> fusedCandidates = new ArrayList<>();
+        for (Map.Entry<Long, Double> entry : fused.entrySet()) {
+            RetrievalCandidate candidate = candidatesById(materialized).get(entry.getKey());
+            if (candidate == null) {
+                continue;
+            }
+            candidate.rerankScore(entry.getValue());
+            fusedCandidates.add(candidate);
+        }
+
+        // 3. Cross-Encoder rerank (overwrites rerankScore with the reranker's relevance score).
+        try {
+            Reranker reranker = rerankerFactory.getReranker();
+            if (!fusedCandidates.isEmpty()) {
+                fusedCandidates = reranker.rerank(query, fusedCandidates);
+            }
+        } catch (Exception e) {
+            // Rerank is best-effort: keep RRF scores if the reranker blows up.
+            log.warn("Reranker invocation failed, falling back to RRF scores: {}", e.getMessage());
+        }
+
+        // 4. Apply minScore threshold + truncate.
+        return fusedCandidates.stream()
+                .filter(candidate -> (candidate.rerankScore() == null ? 0.0 : candidate.rerankScore()) >= minScore)
+                .sorted((left, right) -> Double.compare(
+                        right.rerankScore() == null ? 0.0 : right.rerankScore(),
+                        left.rerankScore() == null ? 0.0 : left.rerankScore()))
+                .limit(topK)
+                .toList();
+    }
+
+    /**
+     * Legacy ranking path: linear fusion 0.65·vector + 0.35·keyword.
+     * Retained as an explicit fallback when the industrial components are not wired
+     * (e.g. in unit tests that construct the service without a Spring context).
+     */
+    private List<RetrievalCandidate> rankWithLegacyLinearFusion(String query,
+                                                                List<RetrievalCandidate> materialized,
+                                                                double minScore,
+                                                                int topK) {
+        return materialized.stream()
+                .peek(candidate -> candidate.rerankScore(ragRetrievalScorer.rerankScore(
+                        candidate.vectorScore() == null ? 0.0 : candidate.vectorScore(),
+                        candidate.keywordScore() == null ? 0.0 : candidate.keywordScore()
+                )))
+                .filter(candidate -> candidate.rerankScore() >= minScore)
+                .sorted((left, right) -> Double.compare(right.rerankScore(), left.rerankScore()))
+                .limit(topK)
+                .toList();
+    }
+
+    private Map<Long, RetrievalCandidate> candidatesById(List<RetrievalCandidate> candidates) {
+        Map<Long, RetrievalCandidate> byId = new LinkedHashMap<>();
+        for (RetrievalCandidate candidate : candidates) {
+            byId.put(candidate.chunkId(), candidate);
+        }
+        return byId;
+    }
+
+    private Map<Long, Double> sortByValueDescending(Map<Long, Double> scores) {
+        return scores.entrySet().stream()
+                .sorted(Map.Entry.<Long, Double>comparingByValue().reversed())
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
     }
 
     public List<RetrievedChunk> retrieveAuthorized(Long knowledgeBaseId,
@@ -728,17 +916,41 @@ public class KnowledgeBaseService {
     }
 
     private List<KnowledgeChunk> searchKeywordCandidates(Long knowledgeBaseId, String query, int limit) {
-        List<String> terms = ragRetrievalScorer.searchTerms(query);
-        if (terms.isEmpty()) {
-            return List.of();
+        if (bm25Scorer == null) {
+            // BM25 not available (legacy test constructor); fall back to MySQL FULLTEXT.
+            List<String> terms = ragRetrievalScorer.searchTerms(query);
+            if (terms.isEmpty()) return List.of();
+            String joinedTerms = String.join(" ", terms);
+            LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<KnowledgeChunk>()
+                    .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
+                    .apply("MATCH(content, source_name, section_title) AGAINST({0} IN BOOLEAN MODE)", joinedTerms)
+                    .last("LIMIT " + Math.max(1, limit));
+            return knowledgeChunkMapper.selectList(wrapper);
         }
 
-        String joinedTerms = String.join(" ", terms);
-        LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<KnowledgeChunk>()
-                .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
-                .apply("MATCH(content, source_name, section_title) AGAINST({0} IN BOOLEAN MODE)", joinedTerms)
-                .last("LIMIT " + Math.max(1, limit));
-        return knowledgeChunkMapper.selectList(wrapper);
+        // BM25-based keyword recall: pull compatible chunks, score them, return top N.
+        // Note: for large knowledge bases (10K+ chunks), consider an inverted-index pre-filter.
+        List<KnowledgeChunk> allChunks = knowledgeChunkMapper.selectList(
+                new LambdaQueryWrapper<KnowledgeChunk>()
+                        .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId));
+        if (allChunks.isEmpty()) return List.of();
+
+        // Filter to compatible embeddings (same provider/dimensions as current config)
+        List<KnowledgeChunk> compatible = allChunks.stream()
+                .filter(this::isCompatibleEmbedding)
+                .toList();
+        if (compatible.isEmpty()) return List.of();
+
+        Map<Long, Double> scores = bm25Scorer.scoreBatch(query, compatible);
+        if (scores.isEmpty()) return List.of();
+
+        return compatible.stream()
+                .filter(chunk -> scores.containsKey(chunk.getId()))
+                .sorted((a, b) -> Double.compare(
+                        scores.getOrDefault(b.getId(), 0.0),
+                        scores.getOrDefault(a.getId(), 0.0)))
+                .limit(Math.max(1, limit))
+                .toList();
     }
 
     private void enrichRetrievedCandidates(List<RetrievalCandidate> candidates,

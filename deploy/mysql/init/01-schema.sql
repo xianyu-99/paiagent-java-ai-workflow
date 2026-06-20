@@ -186,7 +186,8 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     INDEX idx_chunk_kb_id (knowledge_base_id),
     INDEX idx_chunk_doc_id (document_id),
     INDEX idx_chunk_doc_page (document_id, page_number, chunk_index),
-    INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension)
+    INDEX idx_chunk_embedding_meta (knowledge_base_id, embedding_provider, embedding_model, embedding_dimension),
+    FULLTEXT INDEX ft_chunk_content (content, source_name, section_title) WITH PARSER ngram
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS knowledge_import_task (
