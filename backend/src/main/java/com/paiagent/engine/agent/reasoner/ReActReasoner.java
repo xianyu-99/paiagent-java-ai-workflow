@@ -39,7 +39,8 @@ public class ReActReasoner implements ReasoningEngine {
     @Override
     public ReasoningResult reason(AgentState state, List<Tool> availableTools, ChatClient chatClient) {
         // 1. Build system prompt with available tools
-        String systemPrompt = ReActPromptBuilder.buildSystemPrompt(availableTools, null, state.getMemoryContext());
+        String systemPrompt = ReActPromptBuilder.buildSystemPrompt(
+                availableTools, state.getSystemPrompt(), state.getMemoryContext());
 
         // 2. Build user prompt with task + history
         String userPrompt = ReActPromptBuilder.buildUserPrompt(state.getTask(), state.getHistoryAsText(), state.getMemoryContext());

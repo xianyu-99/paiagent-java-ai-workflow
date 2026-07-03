@@ -23,11 +23,7 @@ const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
 };
 
 // 后置可选工具列表（按需扩充）
-const AVAILABLE_TOOLS = [
-  { label: 'WebSearch (网络搜索)', value: 'web_search' },
-  { label: 'Calculator (计算器)', value: 'calculator' },
-  { label: 'CodeInterpreter (代码解释器)', value: 'code_interpreter' },
-];
+const AVAILABLE_TOOLS: { label: string; value: string }[] = [];
 
 export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenceableParams, registerDraftSaver }) => {
   const llmGlobalConfigs = useLLMConfigStore(state => state.configs);

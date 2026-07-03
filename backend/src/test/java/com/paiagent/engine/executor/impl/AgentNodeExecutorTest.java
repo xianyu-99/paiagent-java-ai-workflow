@@ -245,4 +245,42 @@ class AgentNodeExecutorTest {
         verify(chatClientFactory).createClient(eq("openai"), eq("https://global.api.com"),
                 eq("global-key"), eq("global-model"), any());
     }
+
+    @Test
+    void shouldBuildTaskFromInputParamsAndCarrySystemPrompt() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("systemPrompt", "Answer with strict JSON.");
+        data.put("inputParams", List.of(Map.of(
+                "name", "task",
+                "type", "reference",
+                "referenceNode", "input"
+        )));
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(ReasoningResult.finalAnswer("Done", "Answer"));
+
+        executor.execute(node, Map.of("input", "Summarize the ticket"));
+
+        verify(reasoningEngine).reason(argThat(state ->
+                state != null
+                        && "Summarize the ticket".equals(state.getTask())
+                        && "Answer with strict JSON.".equals(state.getSystemPrompt())
+        ), anyList(), eq(chatClient));
+    }
+
+    @Test
+    void shouldFailWhenConfiguredToolDoesNotExist() {
+        Map<String, Object> data = validConfig();
+        data.put("tools", List.of("calculator"));
+
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class,
+                () -> executor.execute(agentNode(data), Map.of("input", "2+2")));
+
+        assertTrue(exception.getMessage().contains("unknown tools"));
+    }
 }

@@ -36,6 +36,8 @@ public class AgentState {
     private final int maxIterations;        // 最大允许迭代次数
     private String memoryContext;           // 记忆上下文（从知识库或执行记忆中检索）
 
+    private String systemPrompt;
+
     public AgentState(String sessionId, String task, int maxIterations) {
         this.sessionId = sessionId;
         this.task = task;

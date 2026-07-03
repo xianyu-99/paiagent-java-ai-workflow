@@ -148,11 +148,11 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
   const commitDraft = useCallback(() => {
     let provider = '';
     let apiUrl = '';
-    let apiKey = '';
+    const apiKey = '';
     let model = '';
-    let temperature = 0.7;
+    let temperature = Number.NaN;
 
-    if (!ragConfig.retrievalOnly && ragConfig.configId) {
+    if (ragConfig.configId) {
       const config = llmGlobalConfigs.find(c => c.id === ragConfig.configId);
       if (config) {
         provider = normalizeProviderKey(config.provider);
@@ -162,16 +162,21 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
       }
     }
 
+    if (!provider) provider = (node.data?.provider as string) || '';
+    if (!apiUrl) apiUrl = (node.data?.apiUrl as string) || '';
+    if (!model) model = (node.data?.model as string) || '';
+    if (!Number.isFinite(temperature)) temperature = (node.data?.temperature as number | undefined) ?? 0.7;
+
     const updatedData = {
       ...node.data,
       type: 'rag',
       knowledgeBaseId: ragConfig.knowledgeBaseId,
-      configId: ragConfig.retrievalOnly ? undefined : ragConfig.configId,
-      provider: ragConfig.retrievalOnly ? undefined : provider,
-      apiUrl: ragConfig.retrievalOnly ? undefined : apiUrl,
-      apiKey: ragConfig.retrievalOnly ? undefined : apiKey,
-      model: ragConfig.retrievalOnly ? undefined : model,
-      temperature: ragConfig.retrievalOnly ? undefined : temperature,
+      configId: ragConfig.configId,
+      provider,
+      apiUrl,
+      apiKey,
+      model,
+      temperature,
       retrievalOnly: ragConfig.retrievalOnly,
       topK: ragConfig.topK,
       minScore: ragConfig.minScore,

@@ -3,6 +3,7 @@ package com.paiagent.engine.executor.impl;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.paiagent.common.security.SafeUrlValidator;
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.model.WorkflowNode;
@@ -10,6 +11,7 @@ import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import com.paiagent.service.MinioService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -33,8 +35,13 @@ import java.util.function.Consumer;
 @Component
 public class MediaNodeExecutor implements NodeExecutor {
 
+    private static final int MAX_DOWNLOAD_REDIRECTS = 5;
+
     @Autowired
     private MinioService minioService;
+
+    @Value("${paiagent.security.allow-private-network-urls:false}")
+    private boolean allowPrivateNetworkUrls;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(60))
@@ -86,8 +93,10 @@ public class MediaNodeExecutor implements NodeExecutor {
         requestBody.put("n", 1);
         requestBody.put("size", resolution);
 
+        URI apiUri = SafeUrlValidator.requireSafeHttpUri(apiUrl, "media apiUrl", allowPrivateNetworkUrls);
+
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(apiUrl))
+                .uri(apiUri)
                 .timeout(Duration.ofMinutes(3))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
@@ -186,32 +195,51 @@ public class MediaNodeExecutor implements NodeExecutor {
     }
 
     private byte[] downloadMedia(String urlStr) throws Exception {
-        URL url = new URL(urlStr);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(60000);
+        URI currentUri = SafeUrlValidator.requireSafeHttpUri(urlStr, "media download URL", allowPrivateNetworkUrls);
 
-        int statusCode = conn.getResponseCode();
-        if (statusCode < 200 || statusCode >= 300) {
-            throw new IllegalStateException("媒体下载失败，HTTP 状态码: " + statusCode);
-        }
+        for (int redirectCount = 0; redirectCount <= MAX_DOWNLOAD_REDIRECTS; redirectCount++) {
+            URL url = currentUri.toURL();
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(60000);
 
-        try (InputStream is = conn.getInputStream();
-             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            int maxSize = 100 * 1024 * 1024;
-            while ((bytesRead = is.read(buffer)) != -1) {
-                if (baos.size() + bytesRead > maxSize) {
-                    throw new IllegalStateException("媒体文件超过 100MB 限制");
+            try {
+                int statusCode = conn.getResponseCode();
+                if (statusCode >= 300 && statusCode < 400) {
+                    String location = conn.getHeaderField("Location");
+                    if (!StringUtils.hasText(location)) {
+                        throw new IllegalStateException("Media download redirect missing Location header");
+                    }
+                    currentUri = currentUri.resolve(location);
+                    currentUri = SafeUrlValidator.requireSafeHttpUri(
+                            currentUri.toString(), "media download redirect URL", allowPrivateNetworkUrls);
+                    continue;
                 }
-                baos.write(buffer, 0, bytesRead);
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new IllegalStateException("媒体下载失败，HTTP 状态码: " + statusCode);
+                }
+
+                try (InputStream is = conn.getInputStream();
+                     ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    int maxSize = 100 * 1024 * 1024;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        if (baos.size() + bytesRead > maxSize) {
+                            throw new IllegalStateException("媒体文件超过 100MB 限制");
+                        }
+                        baos.write(buffer, 0, bytesRead);
+                    }
+                    return baos.toByteArray();
+                }
+            } finally {
+                conn.disconnect();
             }
-            return baos.toByteArray();
-        } finally {
-            conn.disconnect();
         }
+
+        throw new IllegalStateException("Media download exceeded redirect limit");
     }
 
     private String stringValue(Object value) {

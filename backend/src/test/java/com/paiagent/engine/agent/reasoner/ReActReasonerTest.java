@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
@@ -124,5 +125,16 @@ class ReActReasonerTest {
     @Test
     void shouldReturnReactMode() {
         assertEquals("react", reasoner.getMode());
+    }
+
+    @Test
+    void shouldIncludeStateSystemPromptInLlmSystemPrompt() {
+        state.setSystemPrompt("Always answer in JSON.");
+        when(assistantMessage.getContent()).thenReturn(
+                "Thought: I can answer.\nFinal Answer: {\"answer\":\"4\"}");
+
+        reasoner.reason(state, tools, chatClient);
+
+        verify(requestSpec).system(contains("Always answer in JSON."));
     }
 }

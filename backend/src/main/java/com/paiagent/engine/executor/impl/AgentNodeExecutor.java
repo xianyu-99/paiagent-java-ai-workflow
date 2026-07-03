@@ -13,6 +13,7 @@ import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.llm.ChatClientFactory;
 import com.paiagent.engine.llm.LLMProviderRegistry;
 import com.paiagent.engine.model.WorkflowNode;
+import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import com.paiagent.entity.LLMGlobalConfig;
 import com.paiagent.service.LLMGlobalConfigService;
 import lombok.extern.slf4j.Slf4j;
@@ -51,6 +52,7 @@ public class AgentNodeExecutor implements NodeExecutor {
         int maxIterations = 5;
         String systemPrompt;
         String taskTemplate;
+        List<Map<String, Object>> inputParams = new ArrayList<>();
         String provider;
         String apiUrl;
         String apiKey;
@@ -104,6 +106,7 @@ public class AgentNodeExecutor implements NodeExecutor {
         // 6. 创建 AgentState
         String sessionId = UUID.randomUUID().toString();
         AgentState state = new AgentState(sessionId, task, config.maxIterations);
+        state.setSystemPrompt(config.systemPrompt);
 
         // 6.5 检索长期记忆上下文
         Long flowId = input != null ? extractFlowId(input) : null;
@@ -301,6 +304,20 @@ public class AgentNodeExecutor implements NodeExecutor {
 
         config.systemPrompt = trimString(data.get("systemPrompt"));
         config.taskTemplate = trimString(data.get("taskTemplate"));
+        Object inputParamsObj = data.get("inputParams");
+        if (inputParamsObj instanceof List<?> inputParamList) {
+            for (Object inputParam : inputParamList) {
+                if (inputParam instanceof Map<?, ?> map) {
+                    Map<String, Object> normalized = new HashMap<>();
+                    for (Map.Entry<?, ?> entry : map.entrySet()) {
+                        if (entry.getKey() != null) {
+                            normalized.put(entry.getKey().toString(), entry.getValue());
+                        }
+                    }
+                    config.inputParams.add(normalized);
+                }
+            }
+        }
 
         // 记忆相关配置
         Object knowledgeBaseIdObj = data.get("knowledgeBaseId");
@@ -353,6 +370,12 @@ public class AgentNodeExecutor implements NodeExecutor {
         if (config.tools == null || config.tools.isEmpty()) {
             return toolRegistry.getAllTools();
         }
+        List<String> missingTools = config.tools.stream()
+                .filter(toolName -> !toolRegistry.hasTool(toolName))
+                .toList();
+        if (!missingTools.isEmpty()) {
+            throw new IllegalArgumentException("Agent node configured unknown tools: " + missingTools);
+        }
         return toolRegistry.getToolsByNames(config.tools);
     }
 
@@ -363,6 +386,9 @@ public class AgentNodeExecutor implements NodeExecutor {
             Object inputValue = input != null ? input.get("input") : null;
             String inputStr = inputValue != null ? inputValue.toString() : "";
             task = task.replace("{{input}}", inputStr);
+            for (Map.Entry<String, String> entry : resolveInputParamValues(config.inputParams, input).entrySet()) {
+                task = task.replace("{{" + entry.getKey() + "}}", entry.getValue());
+            }
 
             // 替换其他引用参数
             if (input != null) {
@@ -376,10 +402,74 @@ public class AgentNodeExecutor implements NodeExecutor {
         }
 
         // 默认使用 input 字段
+        String taskFromParams = buildTaskFromInputParams(config.inputParams, input);
+        if (!isBlank(taskFromParams)) {
+            return taskFromParams;
+        }
+
+        if (input != null && input.get("output") != null) {
+            return input.get("output").toString();
+        }
+
         if (input != null && input.get("input") != null) {
             return input.get("input").toString();
         }
         return "";
+    }
+
+    private String buildTaskFromInputParams(List<Map<String, Object>> inputParams, Map<String, Object> input) {
+        Map<String, String> values = resolveInputParamValues(inputParams, input);
+        if (values.isEmpty()) {
+            return "";
+        }
+
+        for (String preferredName : List.of("task", "input", "question", "prompt")) {
+            String preferredValue = values.get(preferredName);
+            if (!isBlank(preferredValue)) {
+                return preferredValue;
+            }
+        }
+
+        if (values.size() == 1) {
+            return values.values().iterator().next();
+        }
+
+        return values.entrySet().stream()
+                .map(entry -> entry.getKey() + ": " + entry.getValue())
+                .reduce((left, right) -> left + "\n" + right)
+                .orElse("");
+    }
+
+    private Map<String, String> resolveInputParamValues(List<Map<String, Object>> inputParams, Map<String, Object> input) {
+        Map<String, String> values = new LinkedHashMap<>();
+        if (inputParams == null || inputParams.isEmpty()) {
+            return values;
+        }
+
+        for (Map<String, Object> param : inputParams) {
+            String name = trimString(param.get("name"));
+            if (isBlank(name)) {
+                continue;
+            }
+
+            String value = resolveAgentInputParam(param, input);
+            if (!isBlank(value)) {
+                values.put(name, value);
+            }
+        }
+        return values;
+    }
+
+    private String resolveAgentInputParam(Map<String, Object> param, Map<String, Object> input) {
+        String type = trimString(param.get("type"));
+        if ("input".equals(type)) {
+            return trimString(param.get("value"));
+        }
+        if ("reference".equals(type)) {
+            Object value = WorkflowReferenceResolver.resolve(trimString(param.get("referenceNode")), input);
+            return value == null ? null : String.valueOf(value);
+        }
+        return null;
     }
 
     /**

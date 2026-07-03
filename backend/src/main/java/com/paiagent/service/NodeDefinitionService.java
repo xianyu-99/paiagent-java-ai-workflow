@@ -158,7 +158,7 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setIcon("📚");
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"context\":{\"type\":\"string\"},\"retrievedChunks\":{\"type\":\"array\"},\"retrievedCount\":{\"type\":\"number\"}}}");
-        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"knowledgeBaseId\":{\"type\":\"number\"},\"topK\":{\"type\":\"number\",\"default\":3},\"minScore\":{\"type\":\"number\",\"default\":0},\"contextWindow\":{\"type\":\"number\",\"default\":1},\"contextMaxChars\":{\"type\":\"number\",\"default\":1800},\"configId\":{\"type\":\"number\"},\"prompt\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"knowledgeBaseId\":{\"type\":\"number\"},\"retrievalOnly\":{\"type\":\"boolean\",\"default\":false},\"topK\":{\"type\":\"number\",\"default\":3},\"minScore\":{\"type\":\"number\",\"default\":0},\"contextWindow\":{\"type\":\"number\",\"default\":1},\"contextMaxChars\":{\"type\":\"number\",\"default\":1800},\"configId\":{\"type\":\"number\"},\"prompt\":{\"type\":\"string\"}}}");
         return nodeDefinition;
     }
 
@@ -170,7 +170,7 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setIcon("🕵️");
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"thoughts\":{\"type\":\"array\"},\"iterations\":{\"type\":\"number\"}}}");
-        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"model\":{\"type\":\"string\"},\"systemPrompt\":{\"type\":\"string\"},\"temperature\":{\"type\":\"number\",\"default\":0.2},\"maxIterations\":{\"type\":\"number\",\"default\":5},\"reasoningMode\":{\"type\":\"string\",\"default\":\"react\"},\"tools\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"apiUrl\":{\"type\":\"string\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"systemPrompt\":{\"type\":\"string\"},\"taskTemplate\":{\"type\":\"string\",\"default\":\"{{input}}\"},\"temperature\":{\"type\":\"number\",\"default\":0.2},\"maxIterations\":{\"type\":\"number\",\"default\":5},\"reasoningMode\":{\"type\":\"string\",\"default\":\"react\"},\"tools\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"knowledgeBaseId\":{\"type\":\"number\"},\"enableExecutionMemory\":{\"type\":\"boolean\",\"default\":false},\"memoryTopK\":{\"type\":\"number\",\"default\":3},\"memoryMinScore\":{\"type\":\"number\",\"default\":0.5}}}");
         return nodeDefinition;
     }
 
