@@ -256,7 +256,27 @@ INSERT INTO node_definition (node_type, display_name, category, icon, input_sche
 ('rag', '知识库问答', 'KNOWLEDGE', '📚',
  '{"type": "object", "properties": {"question": {"type": "string"}}}',
  '{"type": "object", "properties": {"output": {"type": "string"}, "context": {"type": "string"}, "citations": {"type": "array"}, "retrievedChunks": {"type": "array"}, "retrievedCount": {"type": "number"}}}',
- '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "retrievalOnly": {"type": "boolean", "default": false}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "contextWindow": {"type": "number", "default": 1}, "contextMaxChars": {"type": "number", "default": 1800}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}')
+ '{"type": "object", "properties": {"knowledgeBaseId": {"type": "number"}, "retrievalOnly": {"type": "boolean", "default": false}, "topK": {"type": "number", "default": 3}, "minScore": {"type": "number", "default": 0}, "contextWindow": {"type": "number", "default": 1}, "contextMaxChars": {"type": "number", "default": 1800}, "configId": {"type": "number"}, "prompt": {"type": "string"}}}'),
+
+('agent', '智能体', 'AGENT', '🕵️',
+ '{"type": "object", "properties": {"input": {"type": "string"}}}',
+ '{"type": "object", "properties": {"output": {"type": "string"}}}',
+ '{"type": "object", "properties": {"provider": {"type": "string"}, "configId": {"type": "number"}, "model": {"type": "string"}, "systemPrompt": {"type": "string", "default": "你是一个智能助手，可以使用工具帮助用户解决问题。"}, "taskTemplate": {"type": "string", "default": "{{input}}"}, "temperature": {"type": "number", "default": 0.2}, "maxIterations": {"type": "number", "default": 5}, "reasoningMode": {"type": "string", "default": "react"}, "tools": {"type": "array", "items": {"type": "string"}}, "enableExecutionMemory": {"type": "boolean", "default": false}}}'),
+
+('media', '媒体生成', 'TOOL', '🎬',
+ '{"type": "object", "properties": {"prompt": {"type": "string"}}}',
+ '{"type": "object", "properties": {"mediaUrl": {"type": "string"}, "mediaType": {"type": "string"}, "output": {"type": "string"}}}',
+ '{"type": "object", "properties": {"provider": {"type": "string", "default": "openai"}, "apiUrl": {"type": "string"}, "apiKey": {"type": "string"}, "model": {"type": "string", "default": "dall-e-3"}, "resolution": {"type": "string", "default": "1024x1024"}, "mediaType": {"type": "string", "default": "image"}}}'),
+
+('hyde', 'HyDE 查询改写', 'KNOWLEDGE', '🧭',
+ '{"type": "object", "properties": {"input": {"type": "string"}}}',
+ '{"type": "object", "properties": {"originalQuery": {"type": "string"}, "hydeQuery": {"type": "string"}, "output": {"type": "string"}}}',
+ '{"type": "object", "properties": {"provider": {"type": "string"}, "configId": {"type": "number"}, "apiKey": {"type": "string"}, "model": {"type": "string"}, "skillName": {"type": "string", "default": "service-desk-answer"}, "prompt": {"type": "string", "default": "你是企业服务台助手。请结合用户问题、RAG 上下文和引用来源回答，只输出 answer、citations、confidence、resolved、nextAction、ticketSummary、escalationReason 组成的 JSON。"}, "temperature": {"type": "number", "default": 0.2}, "maxTokens": {"type": "number", "default": 1200}}}'),
+
+('query_expansion', '查询扩展', 'KNOWLEDGE', '🔎',
+ '{"type": "object", "properties": {"input": {"type": "string"}}}',
+ '{"type": "object", "properties": {"originalQuery": {"type": "string"}, "expandedQueries": {"type": "array", "items": {"type": "string"}}, "output": {"type": "string"}}}',
+ '{"type": "object", "properties": {"provider": {"type": "string"}, "configId": {"type": "number"}, "apiKey": {"type": "string"}, "model": {"type": "string"}, "temperature": {"type": "number", "default": 0.2}, "expansionCount": {"type": "number", "default": 3}}}')
 ON DUPLICATE KEY UPDATE
     display_name = VALUES(display_name),
     category = VALUES(category),

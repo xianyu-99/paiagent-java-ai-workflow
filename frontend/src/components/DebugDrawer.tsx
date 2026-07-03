@@ -417,6 +417,8 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
               {(() => {
                 let audioUrl: string | null = null;
                 let fileName: string | undefined;
+                let mediaUrl: string | null = null;
+                let mediaType: string | null = null;
 
                 let outputData = executionResult.outputData;
                 if (typeof outputData === 'string') {
@@ -435,7 +437,12 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
                     audioUrl = outputRecord.audioUrl;
                   }
 
-                  if (!audioUrl && typeof outputRecord.output === 'string') {
+                  if (typeof outputRecord.mediaUrl === 'string') {
+                    mediaUrl = outputRecord.mediaUrl;
+                    mediaType = typeof outputRecord.mediaType === 'string' ? outputRecord.mediaType : 'image';
+                  }
+
+                  if (!audioUrl && !mediaUrl && typeof outputRecord.output === 'string') {
                     const output = outputRecord.output;
                     if (output.includes('http://') || output.includes('https://')) {
                       audioUrl = output;
@@ -457,12 +464,27 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
                     <div className="space-y-3">
                       <ServiceDeskResultCard value={outputData} rawTitle="Raw final output JSON" />
                       {audioUrl && <AudioPlayer audioUrl={audioUrl} fileName={fileName} />}
+                      {mediaUrl && (
+                        mediaType === 'video' ? (
+                          <video controls src={mediaUrl} className="w-full rounded border border-gray-200" />
+                        ) : (
+                          <img src={mediaUrl} alt="Generated Media" className="w-full rounded border border-gray-200 object-contain" />
+                        )
+                      )}
                     </div>
                   );
                 }
 
                 if (audioUrl) {
                   return <AudioPlayer audioUrl={audioUrl} fileName={fileName} />;
+                }
+
+                if (mediaUrl) {
+                  return mediaType === 'video' ? (
+                    <video controls src={mediaUrl} className="w-full rounded border border-gray-200" />
+                  ) : (
+                    <img src={mediaUrl} alt="Generated Media" className="w-full rounded border border-gray-200 object-contain" />
+                  );
                 }
 
                 return <ServiceDeskResultCard value={executionResult.outputData} rawTitle="Raw final output JSON" />;

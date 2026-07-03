@@ -8,15 +8,18 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.io.ByteArrayOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.when;
 
 class DocumentParsingServiceTest {
 
-    private final DocumentParsingService documentParsingService = new DocumentParsingService();
+    private final DocumentParsingService documentParsingService = new DocumentParsingService(emptyParsingAgentProvider());
 
     @Test
     void parseMarkdownByHeading() {
@@ -110,5 +113,12 @@ class DocumentParsingServiceTest {
             contentStream.showText(text);
             contentStream.endText();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ObjectProvider<ExternalParsingAgentClient> emptyParsingAgentProvider() {
+        ObjectProvider<ExternalParsingAgentClient> provider = Mockito.mock(ObjectProvider.class);
+        when(provider.getIfAvailable()).thenReturn(null);
+        return provider;
     }
 }

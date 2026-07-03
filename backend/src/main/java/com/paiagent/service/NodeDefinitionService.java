@@ -40,6 +40,10 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinitionMap.put("condition", createConditionNodeDefinition());
         nodeDefinitionMap.put("tts", createTtsNodeDefinition());
         nodeDefinitionMap.put("rag", createRagNodeDefinition());
+        nodeDefinitionMap.put("agent", createAgentNodeDefinition());
+        nodeDefinitionMap.put("media", createMediaNodeDefinition());
+        nodeDefinitionMap.put("hyde", createHydeNodeDefinition());
+        nodeDefinitionMap.put("query_expansion", createQueryExpansionNodeDefinition());
 
         return nodeDefinitionMap.values().stream()
                 .filter(node -> node.getDeleted() == null || node.getDeleted() == 0)
@@ -67,6 +71,18 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         }
         if ("rag".equals(nodeType)) {
             return createRagNodeDefinition();
+        }
+        if ("agent".equals(nodeType)) {
+            return createAgentNodeDefinition();
+        }
+        if ("media".equals(nodeType)) {
+            return createMediaNodeDefinition();
+        }
+        if ("hyde".equals(nodeType)) {
+            return createHydeNodeDefinition();
+        }
+        if ("query_expansion".equals(nodeType)) {
+            return createQueryExpansionNodeDefinition();
         }
 
         return this.lambdaQuery()
@@ -143,6 +159,54 @@ public class NodeDefinitionService extends ServiceImpl<NodeDefinitionMapper, Nod
         nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"question\":{\"type\":\"string\"}}}");
         nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"context\":{\"type\":\"string\"},\"retrievedChunks\":{\"type\":\"array\"},\"retrievedCount\":{\"type\":\"number\"}}}");
         nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"knowledgeBaseId\":{\"type\":\"number\"},\"topK\":{\"type\":\"number\",\"default\":3},\"minScore\":{\"type\":\"number\",\"default\":0},\"contextWindow\":{\"type\":\"number\",\"default\":1},\"contextMaxChars\":{\"type\":\"number\",\"default\":1800},\"configId\":{\"type\":\"number\"},\"prompt\":{\"type\":\"string\"}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createAgentNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("agent");
+        nodeDefinition.setDisplayName("智能体");
+        nodeDefinition.setCategory("AGENT");
+        nodeDefinition.setIcon("🕵️");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"thoughts\":{\"type\":\"array\"},\"iterations\":{\"type\":\"number\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"model\":{\"type\":\"string\"},\"systemPrompt\":{\"type\":\"string\"},\"temperature\":{\"type\":\"number\",\"default\":0.2},\"maxIterations\":{\"type\":\"number\",\"default\":5},\"reasoningMode\":{\"type\":\"string\",\"default\":\"react\"},\"tools\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createMediaNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("media");
+        nodeDefinition.setDisplayName("媒体生成");
+        nodeDefinition.setCategory("TOOL");
+        nodeDefinition.setIcon("🎬");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"mediaUrl\":{\"type\":\"string\"},\"mediaType\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\",\"default\":\"openai\"},\"apiUrl\":{\"type\":\"string\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\",\"default\":\"dall-e-3\"},\"resolution\":{\"type\":\"string\",\"default\":\"1024x1024\"},\"mediaType\":{\"type\":\"string\",\"default\":\"image\"}}}");
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createHydeNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("hyde");
+        nodeDefinition.setDisplayName("HyDE 查询改写");
+        nodeDefinition.setCategory("KNOWLEDGE");
+        nodeDefinition.setIcon("🧭");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"originalQuery\":{\"type\":\"string\"},\"hydeQuery\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema(createGenericLlmNodeDefinition().getConfigSchema());
+        return nodeDefinition;
+    }
+
+    private NodeDefinition createQueryExpansionNodeDefinition() {
+        NodeDefinition nodeDefinition = new NodeDefinition();
+        nodeDefinition.setNodeType("query_expansion");
+        nodeDefinition.setDisplayName("查询扩展");
+        nodeDefinition.setCategory("KNOWLEDGE");
+        nodeDefinition.setIcon("🔎");
+        nodeDefinition.setInputSchema("{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}");
+        nodeDefinition.setOutputSchema("{\"type\":\"object\",\"properties\":{\"originalQuery\":{\"type\":\"string\"},\"expandedQueries\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"output\":{\"type\":\"string\"}}}");
+        nodeDefinition.setConfigSchema("{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"temperature\":{\"type\":\"number\",\"default\":0.2},\"expansionCount\":{\"type\":\"number\",\"default\":3}}}");
         return nodeDefinition;
     }
 }

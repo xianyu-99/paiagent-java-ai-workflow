@@ -20,8 +20,17 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 @Service
 public class DocumentParsingService {
+
+    private final ExternalParsingAgentClient parsingAgentClient;
+
+    public DocumentParsingService(org.springframework.beans.factory.ObjectProvider<ExternalParsingAgentClient> parsingAgentClientProvider) {
+        this.parsingAgentClient = parsingAgentClientProvider.getIfAvailable();
+    }
 
     public ParsedDocument parseText(String fileName, String content) {
         String safeName = StringUtils.hasText(fileName) ? fileName.trim() : "manual.txt";
@@ -80,7 +89,19 @@ public class DocumentParsingService {
                 ));
             }
         }
-        return new ParsedDocument(fileName, contentType, "pdfbox", rawText.toString().trim(), segments);
+
+        // --- OCR Fallback Logic ---
+        String extractedText = rawText.toString().trim();
+        // If extracted text is suspiciously short (e.g., < 50 chars), it's likely a scanned PDF
+        if (extractedText.length() < 50 && parsingAgentClient != null) {
+            log.warn("Detected scanned or image-based PDF (length: {}). Falling back to OCR Server Agent...", extractedText.length());
+            String ocrText = parsingAgentClient.parseScannedDocument(fileName, bytes);
+            // Re-parse the markdown output from the OCR Server Agent
+            ParsedDocument markdownParsed = parsePlainOrMarkdown(fileName, "text/markdown", ocrText);
+            return new ParsedDocument(fileName, contentType, "ocr-server-agent", markdownParsed.rawText(), markdownParsed.segments());
+        }
+
+        return new ParsedDocument(fileName, contentType, "pdfbox", extractedText, segments);
     }
 
     private ParsedDocument parseDocx(String fileName, String contentType, byte[] bytes) throws Exception {
@@ -162,7 +183,8 @@ public class DocumentParsingService {
         List<ParsedSegment> segments = new ArrayList<>();
         StringBuilder rawText = new StringBuilder();
 
-        if (fileName.toLowerCase(Locale.ROOT).endsWith(".md")
+        if ("text/markdown".equalsIgnoreCase(contentType)
+                || fileName.toLowerCase(Locale.ROOT).endsWith(".md")
                 || fileName.toLowerCase(Locale.ROOT).endsWith(".markdown")) {
             String currentTitle = null;
             StringBuilder currentText = new StringBuilder();

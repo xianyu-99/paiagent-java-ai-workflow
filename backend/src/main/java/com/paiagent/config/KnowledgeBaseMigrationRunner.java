@@ -46,6 +46,9 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         hideLegacyProviderNodeDefinitions();
         upsertTtsNodeDefinition();
         upsertRagNodeDefinition();
+        upsertAgentNodeDefinition();
+        upsertMediaNodeDefinition();
+        upsertQueryEnhancementNodeDefinitions();
         seedEnterpriseServiceDeskKnowledge();
     }
 
@@ -225,6 +228,51 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                     updated_at = CURRENT_TIMESTAMP
                 """);
         log.info("RAG 知识库表与节点定义迁移完成");
+    }
+
+    private void upsertAgentNodeDefinition() {
+        upsertNodeDefinition(
+                "agent",
+                "智能体",
+                "AGENT",
+                "🕵️",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"output\":{\"type\":\"string\"},\"thoughts\":{\"type\":\"array\"},\"iterations\":{\"type\":\"number\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"model\":{\"type\":\"string\"},\"systemPrompt\":{\"type\":\"string\",\"default\":\"你是一个智能助手，可以使用工具帮助用户解决问题。\"},\"taskTemplate\":{\"type\":\"string\",\"default\":\"{{input}}\"},\"temperature\":{\"type\":\"number\",\"default\":0.2},\"maxIterations\":{\"type\":\"number\",\"default\":5},\"reasoningMode\":{\"type\":\"string\",\"default\":\"react\"},\"tools\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"enableExecutionMemory\":{\"type\":\"boolean\",\"default\":false}}}"
+        );
+    }
+
+    private void upsertMediaNodeDefinition() {
+        upsertNodeDefinition(
+                "media",
+                "媒体生成",
+                "TOOL",
+                "🎬",
+                "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"mediaUrl\":{\"type\":\"string\"},\"mediaType\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\",\"default\":\"openai\"},\"apiUrl\":{\"type\":\"string\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\",\"default\":\"dall-e-3\"},\"resolution\":{\"type\":\"string\",\"default\":\"1024x1024\"},\"mediaType\":{\"type\":\"string\",\"default\":\"image\"}}}"
+        );
+    }
+
+    private void upsertQueryEnhancementNodeDefinitions() {
+        upsertNodeDefinition(
+                "hyde",
+                "HyDE 查询改写",
+                "KNOWLEDGE",
+                "🧭",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"originalQuery\":{\"type\":\"string\"},\"hydeQuery\":{\"type\":\"string\"},\"output\":{\"type\":\"string\"}}}",
+                DEFAULT_LLM_CONFIG_SCHEMA.strip()
+        );
+        upsertNodeDefinition(
+                "query_expansion",
+                "查询扩展",
+                "KNOWLEDGE",
+                "🔎",
+                "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"originalQuery\":{\"type\":\"string\"},\"expandedQueries\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"output\":{\"type\":\"string\"}}}",
+                "{\"type\":\"object\",\"properties\":{\"provider\":{\"type\":\"string\"},\"configId\":{\"type\":\"number\"},\"apiKey\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"temperature\":{\"type\":\"number\",\"default\":0.2},\"expansionCount\":{\"type\":\"number\",\"default\":3}}}"
+        );
     }
 
     private void upsertCoreNodeDefinitions() {

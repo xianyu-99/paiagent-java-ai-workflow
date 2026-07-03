@@ -9,9 +9,9 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.paiagent</groupId>
-	<artifactId>paiagent-backend</artifactId>
+	<artifactId>serveragent-backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>PaiAgent</name>
+	<name>ServerAgent</name>
 	<description>AI Agent Workflow Platform Backend</description>
 	<url/>
 	<licenses>

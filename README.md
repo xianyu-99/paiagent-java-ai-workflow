@@ -1,4 +1,4 @@
-# PaiAgent Java AI Workflow
+# ServerAgent Java AI Workflow
 
 基于 Java 21、Spring Boot、ReactFlow 的企业内部服务台 / 知识流程助手平台。项目支持通过拖拽方式组合 `Input -> RAG -> LLM -> Condition -> Output` 等节点，让 IT、HR、行政、客服等场景可以基于企业知识库生成带引用答案，并按置信度自动决定直接回答、创建工单或升级人工。
 

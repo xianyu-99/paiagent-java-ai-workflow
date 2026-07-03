@@ -37,6 +37,8 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
   };
 
   // 按分类分组节点
+  const ioNodes = nodeTypes.filter((node) => node.category === 'IO');
+  const agentNodes = nodeTypes.filter((node) => node.category === 'AGENT');
   const llmNodes = nodeTypes.filter((node) => node.category === 'LLM');
   const flowNodes = nodeTypes.filter((node) => node.category === 'FLOW');
   const knowledgeNodes = nodeTypes.filter((node) => node.category === 'KNOWLEDGE');
@@ -57,6 +59,32 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
   );
 
   const items = [
+    {
+      key: 'io',
+      label: <span className="font-semibold">📥 输入输出</span>,
+      children: (
+        <div>
+          {ioNodes.length > 0 ? (
+            ioNodes.map(renderNodeItem)
+          ) : (
+            <div className="text-gray-400 text-center py-4">暂无节点</div>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'agent',
+      label: <span className="font-semibold">🕵️ 智能体</span>,
+      children: (
+        <div>
+          {agentNodes.length > 0 ? (
+            agentNodes.map(renderNodeItem)
+          ) : (
+            <div className="text-gray-400 text-center py-4">暂无节点</div>
+          )}
+        </div>
+      ),
+    },
     {
       key: 'llm',
       label: <span className="font-semibold">🤖 大模型节点</span>,
@@ -122,7 +150,7 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
         ) : (
           <>
             <Collapse
-              defaultActiveKey={['llm', 'flow', 'knowledge', 'tool']}
+              defaultActiveKey={['io', 'agent', 'llm', 'flow', 'knowledge', 'tool']}
               ghost
               items={items}
               bordered={false}
