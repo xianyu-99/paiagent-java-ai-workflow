@@ -21,7 +21,6 @@ const NodePanel = ({ onDragStart }: NodePanelProps) => {
     setLoading(true);
     try {
       const result = await getNodeTypes();
-      console.log('Node types API result:', result);
       if (result.code === 200) {
         setNodeTypes(result.data);
       } else {

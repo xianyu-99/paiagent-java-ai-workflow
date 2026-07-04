@@ -57,6 +57,14 @@ APP_AUTH_DEFAULT_USERNAME=admin
 APP_AUTH_DEFAULT_PASSWORD=admin123
 ```
 
+默认会拒绝 LLM/TTS 访问内网或本机 URL，以降低 SSRF 风险。需要接入本地模型服务（如 Ollama、LM Studio、内网 OpenAI-compatible 网关）时，可显式设置：
+
+```properties
+PAIAGENT_SECURITY_ALLOW_PRIVATE_NETWORK_URLS=true
+```
+
+即使开启该选项，云厂商 metadata 地址仍会被拦截。
+
 RAG 默认使用本地 Hash Embedding + MySQL 向量检索，可通过环境变量切换到 DashScope Embedding 和 Qdrant。
 
 ## 主要模块

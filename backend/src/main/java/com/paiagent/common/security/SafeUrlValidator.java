@@ -45,19 +45,23 @@ public final class SafeUrlValidator {
             throw new IllegalArgumentException(fieldName + " must contain a host");
         }
 
+        rejectMetadataHost(host, fieldName);
+
         if (!allowPrivateNetworkUrls) {
-            rejectPrivateOrMetadataHost(host, fieldName);
+            rejectPrivateOrLocalHost(host, fieldName);
         }
 
         return uri;
     }
 
-    private static void rejectPrivateOrMetadataHost(String host, String fieldName) {
+    private static void rejectMetadataHost(String host, String fieldName) {
         String normalizedHost = host.toLowerCase(Locale.ROOT);
         if (METADATA_HOSTS.contains(normalizedHost) || "metadata.google.internal".equals(normalizedHost)) {
             throw new IllegalArgumentException(fieldName + " points to a metadata service");
         }
+    }
 
+    private static void rejectPrivateOrLocalHost(String host, String fieldName) {
         InetAddress[] addresses;
         try {
             addresses = InetAddress.getAllByName(host);

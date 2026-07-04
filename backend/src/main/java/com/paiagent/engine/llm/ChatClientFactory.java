@@ -1,5 +1,6 @@
 package com.paiagent.engine.llm;
 
+import com.paiagent.common.security.SafeUrlValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatModel;
@@ -7,8 +8,10 @@ import org.springframework.ai.model.function.FunctionCallback;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.net.URI;
 import java.util.List;
 import java.util.Locale;
 
@@ -23,6 +26,9 @@ public class ChatClientFactory {
     private static final String CHAT_COMPLETIONS_SUFFIX = "/v1/chat/completions";
 
     private static final String V1_SUFFIX = "/v1";
+
+    @Value("${paiagent.security.allow-private-network-urls:false}")
+    private boolean allowPrivateNetworkUrls;
 
     /**
      * 根据提供商和配置创建ChatClient
@@ -56,12 +62,18 @@ public class ChatClientFactory {
         List<FunctionCallback> safeFunctions = functions == null ? List.of() : functions;
         String normalizedProvider = LLMProviderRegistry.normalizeProvider(provider);
         String resolvedApiUrl = LLMProviderRegistry.resolveBaseUrl(normalizedProvider, apiUrl);
+        URI safeApiUri = SafeUrlValidator.requireSafeHttpUri(
+                resolvedApiUrl,
+                "LLM API URL",
+                allowPrivateNetworkUrls
+        );
+        String safeApiUrl = safeApiUri.toString();
         log.info("创建ChatClient - 类型: {}, URL: {}, 模型: {}, 温度: {}, 函数数量: {}",
-                normalizedProvider, resolvedApiUrl, model, temperature, safeFunctions.size());
+                normalizedProvider, safeApiUrl, model, temperature, safeFunctions.size());
 
         ChatModel chatModel = switch (LLMProviderRegistry.getApiType(normalizedProvider)) {
             case OPENAI_COMPATIBLE ->
-                    createOpenAICompatibleModel(resolvedApiUrl, apiKey, model, temperature);
+                    createOpenAICompatibleModel(safeApiUrl, apiKey, model, temperature);
         };
 
         ChatClient.Builder builder = ChatClient.builder(chatModel);

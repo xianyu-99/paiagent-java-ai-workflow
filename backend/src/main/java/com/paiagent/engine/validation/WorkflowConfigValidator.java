@@ -18,6 +18,28 @@ import java.util.Set;
 @Component
 public class WorkflowConfigValidator {
 
+    private static final Set<String> LLM_NODE_TYPES = Set.of(
+            "llm",
+            "openai",
+            "deepseek",
+            "qwen",
+            "step",
+            "zhipu",
+            "ai_ping",
+            "hyde",
+            "query_expansion"
+    );
+
+    private static final Set<String> PROMPT_REQUIRED_LLM_NODE_TYPES = Set.of(
+            "llm",
+            "openai",
+            "deepseek",
+            "qwen",
+            "step",
+            "zhipu",
+            "ai_ping"
+    );
+
     private final NodeExecutorFactory executorFactory;
 
     public WorkflowConfigValidator(NodeExecutorFactory executorFactory) {
@@ -72,8 +94,92 @@ public class WorkflowConfigValidator {
                         + ". Supported types: " + executorFactory.getSupportedNodeTypes());
             }
             nodeTypes.put(nodeId, nodeType);
+            validateNodeConfiguration(node, nodeType);
         }
         return nodeTypes;
+    }
+
+    private void validateNodeConfiguration(WorkflowNode node, String nodeType) {
+        Map<String, Object> data = node.getData() == null ? Map.of() : node.getData();
+        if (LLM_NODE_TYPES.contains(nodeType)) {
+            validateLlmNodeConfiguration(node, nodeType, data);
+            return;
+        }
+        switch (nodeType) {
+            case "agent" -> validateAgentNodeConfiguration(node, data);
+            case "tts" -> validateTtsNodeConfiguration(node, data);
+            case "media" -> validateMediaNodeConfiguration(node, data);
+            case "rag" -> validateRagNodeConfiguration(node, data);
+            default -> {
+            }
+        }
+    }
+
+    private void validateLlmNodeConfiguration(WorkflowNode node, String nodeType, Map<String, Object> data) {
+        if (PROMPT_REQUIRED_LLM_NODE_TYPES.contains(nodeType) && isBlank(stringValue(data.get("prompt")))) {
+            throw invalid("Node " + node.getId() + " is missing prompt");
+        }
+        validateModelConfiguration(node, nodeType, data, "llm".equals(nodeType));
+    }
+
+    private void validateAgentNodeConfiguration(WorkflowNode node, Map<String, Object> data) {
+        if (isBlank(stringValue(data.get("systemPrompt"))) && isBlank(stringValue(data.get("prompt")))) {
+            throw invalid("Node " + node.getId() + " is missing systemPrompt");
+        }
+        validateModelConfiguration(node, "agent", data, true);
+    }
+
+    private void validateTtsNodeConfiguration(WorkflowNode node, Map<String, Object> data) {
+        if (isBlank(stringValue(data.get("model")))) {
+            throw invalid("Node " + node.getId() + " is missing TTS model");
+        }
+        if (isBlank(stringValue(data.get("apiKey"))) && !Boolean.TRUE.equals(data.get("apiKeyConfigured"))) {
+            throw invalid("Node " + node.getId() + " is missing TTS API key");
+        }
+    }
+
+    private void validateMediaNodeConfiguration(WorkflowNode node, Map<String, Object> data) {
+        if (isBlank(stringValue(data.get("apiUrl")))) {
+            throw invalid("Node " + node.getId() + " is missing media API URL");
+        }
+        if (isBlank(stringValue(data.get("apiKey")))) {
+            throw invalid("Node " + node.getId() + " is missing media API key");
+        }
+        if (isBlank(stringValue(data.get("model")))) {
+            throw invalid("Node " + node.getId() + " is missing media model");
+        }
+    }
+
+    private void validateRagNodeConfiguration(WorkflowNode node, Map<String, Object> data) {
+        if (data.get("knowledgeBaseId") == null) {
+            throw invalid("Node " + node.getId() + " is missing knowledgeBaseId");
+        }
+        if (!Boolean.TRUE.equals(data.get("retrievalOnly"))) {
+            validateModelConfiguration(node, "rag", data, false);
+        }
+    }
+
+    private void validateModelConfiguration(
+            WorkflowNode node,
+            String nodeType,
+            Map<String, Object> data,
+            boolean requireProvider
+    ) {
+        if (hasConfigId(data)) {
+            return;
+        }
+        if (requireProvider && isBlank(stringValue(data.get("provider")))) {
+            throw invalid("Node " + node.getId() + " is missing " + nodeType + " provider");
+        }
+        if (isBlank(stringValue(data.get("apiUrl")))) {
+            throw invalid("Node " + node.getId() + " is missing " + nodeType + " API URL");
+        }
+        if (isBlank(stringValue(data.get("apiKey")))) {
+            throw invalid("Node " + node.getId() + " is missing " + nodeType + " API key");
+        }
+        if (isBlank(stringValue(data.get("model")))) {
+            throw invalid("Node " + node.getId() + " is missing " + nodeType + " model");
+        }
     }
 
     private void validateEdges(List<WorkflowEdge> edges, Set<String> nodeIds, Map<String, String> nodeTypes) {
@@ -261,6 +367,10 @@ public class WorkflowConfigValidator {
 
     private String stringValue(Object value) {
         return value == null ? null : String.valueOf(value);
+    }
+
+    private boolean hasConfigId(Map<String, Object> data) {
+        return !isBlank(stringValue(data.get("configId")));
     }
 
     private boolean isBlank(String value) {

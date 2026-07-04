@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, Form, Input, Select, message } from 'antd';
 import { NodeConfigProps } from './types';
 import { useWorkflowStore } from '../../store/workflowStore';
@@ -35,12 +35,23 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
     temperature: 0.2,
     expansionCount: 3,
   });
+  const initializedNodeIdRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+
+  const updateConfig = useCallback((nextConfig: typeof config) => {
+    dirtyRef.current = true;
+    setConfig(nextConfig);
+  }, []);
 
   useEffect(() => {
     fetchLLMGlobalConfigs();
   }, [fetchLLMGlobalConfigs]);
 
   useEffect(() => {
+    if (initializedNodeIdRef.current === node.id && dirtyRef.current) {
+      return;
+    }
+
     const configId = (node.data?.configId as number) || undefined;
     const matchedGlobalConfig = configId
       ? llmGlobalConfigs.find(c => c.id === configId)
@@ -58,6 +69,8 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
       temperature: (node.data?.temperature as number) ?? matchedGlobalConfig?.temperature ?? 0.2,
       expansionCount: (node.data?.expansionCount as number) || 3,
     });
+    initializedNodeIdRef.current = node.id;
+    dirtyRef.current = false;
   }, [node, llmGlobalConfigs]);
 
   const commitDraft = useCallback(() => {
@@ -77,18 +90,39 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
     });
   }, [config, isQueryExpansion, node.data, node.id]);
 
-  useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
-
-  const handleSave = async () => {
+  const validateConfig = useCallback(() => {
     if (!config.configId) {
-      if (!config.provider) { message.warning('请选择供应商'); return; }
-      if (!config.apiUrl) { message.warning('请填写 API 地址'); return; }
-      if (!config.apiKey) { message.warning('请填写 API 密钥'); return; }
-      if (!config.model) { message.warning('请填写模型名称'); return; }
+      if (!config.provider) { message.warning('请选择供应商'); return false; }
+      if (!config.apiUrl) { message.warning('请填写 API 地址'); return false; }
+      if (!config.apiKey) { message.warning('请填写 API 密钥'); return false; }
+      if (!config.model) { message.warning('请填写模型名称'); return false; }
+    }
+    return true;
+  }, [config]);
+
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
     }
     commitDraft();
+    dirtyRef.current = false;
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    dirtyRef.current = false;
+    return true;
+  }, [commitDraft]);
+
+  useEffect(() => {
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
+
+  const handleSave = async () => {
+    if (!validateAndCommit()) {
+      return;
+    }
     await onSave();
   };
 
@@ -104,16 +138,16 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
         <Select
           allowClear
           placeholder="选择已保存的模型配置，或清空后手动填写"
-          value={config.configId}
-          onChange={(value?: number) => {
-            if (!value) {
-              setConfig({ ...config, configId: undefined });
-              return;
-            }
-            const selected = llmGlobalConfigs.find(item => item.id === value);
-            setConfig({
-              ...config,
-              configId: value,
+            value={config.configId}
+            onChange={(value?: number) => {
+              if (!value) {
+              updateConfig({ ...config, configId: undefined });
+                return;
+              }
+              const selected = llmGlobalConfigs.find(item => item.id === value);
+            updateConfig({
+                ...config,
+                configId: value,
               provider: normalizeProviderKey(selected?.provider || config.provider),
               apiUrl: selected?.apiUrl || config.apiUrl,
               apiKey: '',
@@ -138,7 +172,7 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
               options={getSupportedProviderOptions()}
               value={config.provider || undefined}
               onChange={(provider: string) => {
-                setConfig({
+                updateConfig({
                   ...config,
                   provider,
                   apiUrl: getProviderDefaultBaseUrl(provider),
@@ -148,16 +182,16 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
             />
           </Form.Item>
           <Form.Item label="API 地址" required>
-            <Input value={config.apiUrl} onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })} />
+            <Input value={config.apiUrl} onChange={(e) => updateConfig({ ...config, apiUrl: e.target.value })} />
           </Form.Item>
           <Form.Item label="API 密钥" required>
-            <Input.Password value={config.apiKey} onChange={(e) => setConfig({ ...config, apiKey: e.target.value })} />
+            <Input.Password value={config.apiKey} onChange={(e) => updateConfig({ ...config, apiKey: e.target.value })} />
           </Form.Item>
           <Form.Item label="模型名称" required>
             <Input
               placeholder={getProviderModelPlaceholder(config.provider)}
               value={config.model}
-              onChange={(e) => setConfig({ ...config, model: e.target.value })}
+              onChange={(e) => updateConfig({ ...config, model: e.target.value })}
             />
           </Form.Item>
           <Form.Item label="温度">
@@ -167,7 +201,10 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
               min="0"
               max="2"
               value={config.temperature}
-              onChange={(e) => setConfig({ ...config, temperature: parseFloat(e.target.value) || 0.2 })}
+              onChange={(e) => {
+                const nextTemperature = parseFloat(e.target.value);
+                updateConfig({ ...config, temperature: Number.isNaN(nextTemperature) ? 0.2 : nextTemperature });
+              }}
             />
           </Form.Item>
         </>
@@ -180,7 +217,7 @@ export const QueryEnhancementConfig: React.FC<NodeConfigProps> = ({ node, onSave
             min="1"
             max="10"
             value={config.expansionCount}
-            onChange={(e) => setConfig({ ...config, expansionCount: parseInt(e.target.value, 10) || 3 })}
+            onChange={(e) => updateConfig({ ...config, expansionCount: parseInt(e.target.value, 10) || 3 })}
           />
         </Form.Item>
       )}

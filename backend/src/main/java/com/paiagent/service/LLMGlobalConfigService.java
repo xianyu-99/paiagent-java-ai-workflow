@@ -3,10 +3,12 @@ package com.paiagent.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.paiagent.common.security.SafeUrlValidator;
 import com.paiagent.entity.LLMGlobalConfig;
 import com.paiagent.engine.llm.LLMProviderRegistry;
 import com.paiagent.mapper.LLMGlobalConfigMapper;
 import org.springframework.beans.BeanUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +19,9 @@ import java.util.Locale;
 public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, LLMGlobalConfig> {
 
     private final ApiKeyCryptoService apiKeyCryptoService;
+
+    @Value("${paiagent.security.allow-private-network-urls:false}")
+    private boolean allowPrivateNetworkUrls;
 
     public LLMGlobalConfigService(ApiKeyCryptoService apiKeyCryptoService) {
         this.apiKeyCryptoService = apiKeyCryptoService;
@@ -236,5 +241,6 @@ public class LLMGlobalConfigService extends ServiceImpl<LLMGlobalConfigMapper, L
         if (lowerUrl.contains("/docs") || lowerUrl.contains("/ai-models") || lowerUrl.contains("www.kimi.com")) {
             throw new IllegalArgumentException("API 地址不能填写文档或网页地址，请填写接口根地址，例如 https://api.kimi.com/coding 或 https://api.moonshot.cn");
         }
+        SafeUrlValidator.requireSafeHttpUri(apiUrl, "API 地址", allowPrivateNetworkUrls);
     }
 }

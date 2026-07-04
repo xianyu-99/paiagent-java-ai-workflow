@@ -10,12 +10,13 @@ import { ConditionConfig } from './ConditionConfig';
 import { MediaConfig } from './MediaConfig';
 import { QueryEnhancementConfig } from './QueryEnhancementConfig';
 import { isLlmNodeType } from '../../utils/provider';
+import { DraftSaver } from './types';
 
 export interface NodeConfigPanelProps {
   node: Node;
   onSave: () => Promise<void>;
   getReferenceableParams: () => { label: string; value: string }[];
-  registerDraftSaver?: (saver: (() => void) | null) => void;
+  registerDraftSaver?: (saver: DraftSaver | null) => void;
 }
 
 export const NodeConfigPanel: React.FC<NodeConfigPanelProps> = ({ node, onSave, getReferenceableParams, registerDraftSaver }) => {

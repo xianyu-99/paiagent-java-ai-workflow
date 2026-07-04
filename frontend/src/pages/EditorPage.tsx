@@ -1,17 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Button, Input, Form, message, Checkbox, Select, Modal, List, Tabs, Upload, Space, Tag } from 'antd';
-import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DeleteOutlined, UploadOutlined, DatabaseOutlined, ShareAltOutlined, CopyOutlined, LinkOutlined, ApiOutlined, ExperimentOutlined } from '@ant-design/icons';
+import { Button, Input, message, Checkbox, Select, Modal, List, Space, Tag } from 'antd';
+import { SaveOutlined, FolderOpenOutlined, BugOutlined, LogoutOutlined, PlusOutlined, DatabaseOutlined, ShareAltOutlined, CopyOutlined, LinkOutlined, ApiOutlined, ExperimentOutlined } from '@ant-design/icons';
 import { Edge, MarkerType, Node } from '@xyflow/react';
 import NodePanel from '../components/NodePanel';
 import FlowCanvas from '../components/FlowCanvas';
 import DebugDrawer from '../components/DebugDrawer';
-import SkillSelector from '../components/SkillSelector';
 import LLMConfigModal from '../components/LLMConfigModal';
 import { NodeConfigPanel } from '../components/node-config';
+import { DraftSaver } from '../components/node-config/types';
 import { logout } from '../api/auth';
 import { useWorkflowStore } from '../store/workflowStore';
 import { useAuthStore } from '../store/authStore';
-import { useLLMConfigStore } from '../store/llmConfigStore';
 import {
   createWorkflow,
   updateWorkflow,
@@ -32,24 +31,10 @@ import {
   WorkflowTestRun,
 } from '../api/workflow';
 import {
-  createKnowledgeBase,
   listKnowledgeBases,
-  rebuildKnowledgeBaseEmbeddings,
-  uploadKnowledgeDocument,
-  uploadKnowledgeFile,
   KnowledgeBase,
 } from '../api/knowledge';
 import { getRefreshToken } from '../utils/auth';
-import {
-  getProviderDefaultBaseUrl,
-  getProviderFromNodeType,
-  getProviderLabel,
-  getProviderModelPlaceholder,
-  getSupportedProviderOptions,
-  isLlmNodeType,
-  normalizeProviderKey,
-  SUPPORTED_LLM_PROVIDERS,
-} from '../utils/provider';
 import {
   bindDefaultEnterpriseKnowledgeBase,
   createDefaultWorkflowEdges,
@@ -60,75 +45,10 @@ import {
 } from '../utils/workflowNode';
 import { useNavigate, useParams } from 'react-router-dom';
 
-const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
-  openai: 'gpt-4o-mini',
-  deepseek: 'deepseek-chat',
-  qwen: 'qwen-plus',
-  moonshot: 'kimi-k2.6',
-  kimi_code: 'kimi-for-coding',
-  mimo: 'mimo-v2.5-pro',
-};
-
-interface OutputParam {
-  name: string;
-  type: 'input' | 'reference';
-  value: string;
-  referenceNode?: string;
-}
-
-interface LlmInputParam {
-  name: string;
-  type: 'input' | 'reference';
-  value: string;
-  referenceNode?: string;
-}
-
-interface LlmOutputParam {
-  name: string;
-  type: string;
-  description?: string;
-}
-
-interface TtsInputParam {
-  name: string;
-  type: 'input' | 'reference';
-  value: string;
-  referenceNode?: string;
-}
-
-interface TtsOutputParam {
-  name: string;
-  value: string;
-}
-
-interface ConditionConfig {
-  leftType: 'input' | 'reference';
-  leftValue: string;
-  leftReference?: string;
-  operator: string;
-  rightValue: string;
-  caseSensitive: boolean;
-}
-
-interface RagConfig {
-  knowledgeBaseId?: number;
-  configId?: number;
-  retrievalOnly: boolean;
-  questionReference?: string;
-  topK: number;
-  minScore: number;
-  contextWindow: number;
-  contextMaxChars: number;
-  prompt: string;
-}
-
 interface WorkflowCanvasData {
   nodes?: Node[];
   edges?: Edge[];
 }
-
-const MAX_KNOWLEDGE_UPLOAD_SIZE_MB = 50;
-const MAX_KNOWLEDGE_UPLOAD_SIZE = MAX_KNOWLEDGE_UPLOAD_SIZE_MB * 1024 * 1024;
 
 /**
  * 工作流编辑器页面
@@ -137,13 +57,11 @@ const EditorPage = () => {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { username, role, clearAuth } = useAuthStore();
-  const { nodes, edges, currentWorkflowId, setCurrentWorkflowId, selectedNode, setNodes, setEdges } = useWorkflowStore();
+  const { nodes, currentWorkflowId, setCurrentWorkflowId, selectedNode, setNodes, setEdges, setSelectedNode } = useWorkflowStore();
   const [workflowName, setWorkflowName] = useState('企业服务台助手');
   const [engineType, setEngineType] = useState('dag');
   const [saving, setSaving] = useState(false);
   const [debugDrawerOpen, setDebugDrawerOpen] = useState(false);
-  const [outputParams, setOutputParams] = useState<OutputParam[]>([]);
-  const [responseContent, setResponseContent] = useState('');
   const [loadModalOpen, setLoadModalOpen] = useState(false);
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [loadingWorkflows, setLoadingWorkflows] = useState(false);
@@ -167,95 +85,12 @@ const EditorPage = () => {
     maxDurationMs: '',
   });
   const hasLoadedRef = useRef<number | null>(null);
-  const selectedNodeDraftSaverRef = useRef<(() => void) | null>(null);
-  
-  // LLM 节点配置状态
-  const [llmConfig, setLlmConfig] = useState({
-    provider: '',
-    configId: undefined as number | undefined,
-    apiUrl: '',
-    apiKey: '',
-    model: '',
-    temperature: 0.7,
-    prompt: '',
-    skillName: ''
-  });
-  const [llmInputParams, setLlmInputParams] = useState<LlmInputParam[]>([]);
-  const [llmOutputParams, setLlmOutputParams] = useState<LlmOutputParam[]>([]);
-
-  // LLM 全局配置 Store
-  const { configs: llmGlobalConfigs, fetchAllConfigs: fetchLLMGlobalConfigs } = useLLMConfigStore();
-  const providerOptions = getSupportedProviderOptions();
-
-  // TTS 节点配置状态
-  const [ttsConfig, setTtsConfig] = useState({
-    provider: 'qwen',
-    apiUrl: '',
-    apiKey: '',
-    model: 'qwen3-tts-flash',
-    voice: 'Cherry',
-    style: '',
-    languageType: 'Auto',
-    apiKeyConfigured: false
-  });
-  const [ttsInputParams, setTtsInputParams] = useState<TtsInputParam[]>([]);
-  const [ttsOutputParams, setTtsOutputParams] = useState<TtsOutputParam[]>([]);
-  const [conditionConfig, setConditionConfig] = useState<ConditionConfig>({
-    leftType: 'reference',
-    leftValue: '',
-    leftReference: 'input-default.input',
-    operator: 'contains',
-    rightValue: '',
-    caseSensitive: false
-  });
-  const [ragConfig, setRagConfig] = useState<RagConfig>({
-    knowledgeBaseId: undefined,
-    configId: undefined,
-    retrievalOnly: false,
-    questionReference: 'input-default.input',
-    topK: 3,
-    minScore: 0,
-    contextWindow: 1,
-    contextMaxChars: 1800,
-    prompt: ''
-  });
+  const selectedNodeDraftSaverRef = useRef<DraftSaver | null>(null);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
-  const [newKnowledgeBaseName, setNewKnowledgeBaseName] = useState('');
-  const [newKnowledgeBaseDescription, setNewKnowledgeBaseDescription] = useState('');
-  const [knowledgeFileName, setKnowledgeFileName] = useState('manual.txt');
-  const [knowledgeContent, setKnowledgeContent] = useState('');
-  const [knowledgeReindexing, setKnowledgeReindexing] = useState(false);
-  const [knowledgeLocalFile, setKnowledgeLocalFile] = useState<File | null>(null);
-  const [knowledgeFileUploading, setKnowledgeFileUploading] = useState(false);
 
-  const resolveSelectedNodeProvider = (node: Node | null) => {
-    if (!node) {
-      return '';
-    }
-
-    const configuredProvider = normalizeProviderKey(String(node.data?.provider || ''));
-    if (configuredProvider) {
-      return configuredProvider;
-    }
-
-    return getProviderFromNodeType(String(node.data?.type || ''));
-  };
-
-  const shouldReplaceProviderDefault = (
-    currentValue: string,
-    previousProvider: string,
-    defaultResolver: (provider: string) => string
-  ) => {
-    if (!currentValue) {
-      return true;
-    }
-
-    if (Boolean(previousProvider) && currentValue === defaultResolver(previousProvider)) {
-      return true;
-    }
-
-    return SUPPORTED_LLM_PROVIDERS.some((provider) => currentValue === defaultResolver(provider));
-  };
+  const registerSelectedNodeDraftSaver = useCallback((saver: DraftSaver | null) => {
+    selectedNodeDraftSaverRef.current = saver;
+  }, []);
 
   // 处理节点拖拽开始
   const handleDragStart = (event: React.DragEvent, nodeType: string, displayName: string) => {
@@ -265,82 +100,16 @@ const EditorPage = () => {
   };
 
   // 处理节点点击
-  const handleNodeClick = (node: Node) => {
-    console.log('Node clicked:', node);
-
-    useWorkflowStore.getState().setSelectedNode(node);
-
-    // 加载节点配置
-    if (node.data?.type === 'output') {
-      setOutputParams((node.data?.outputParams as OutputParam[]) || []);
-      setResponseContent((node.data?.responseContent as string) || '');
-    } else if (isLlmNodeType(String(node.data?.type || ''))) {
-      // 加载 LLM 节点配置
-      const configId = (node.data?.configId as number) || undefined;
-      const matchedGlobalConfig = configId
-        ? llmGlobalConfigs.find(c => c.id === configId)
-        : undefined;
-      const provider = normalizeProviderKey(
-        matchedGlobalConfig?.provider ||
-        String(node.data?.provider || '') ||
-        getProviderFromNodeType(String(node.data?.type || ''))
-      );
-      setLlmConfig({
-        provider,
-        configId,
-        apiUrl: matchedGlobalConfig?.apiUrl || (node.data?.apiUrl as string) || '',
-        apiKey: configId ? '' : (node.data?.apiKey as string) || '',
-        model: matchedGlobalConfig?.model || (node.data?.model as string) || '',
-        temperature: matchedGlobalConfig?.temperature || (node.data?.temperature as number) || 0.7,
-        prompt: (node.data?.prompt as string) || '',
-        skillName: (node.data?.skillName as string) || ''
-      });
-      setLlmInputParams((node.data?.inputParams as LlmInputParam[]) || []);
-      setLlmOutputParams((node.data?.outputParams as LlmOutputParam[]) || []);
-    } else if (node.data?.type === 'tts') {
-      // 加载 TTS 节点配置
-      setTtsConfig({
-        provider: (node.data?.provider as string) || 'qwen',
-        apiUrl: (node.data?.apiUrl as string) || '',
-        apiKey: (node.data?.apiKey as string) || '',
-        model: (node.data?.model as string) || 'qwen3-tts-flash',
-        voice: (node.data?.voice as string) || 'Cherry',
-        style: (node.data?.style as string) || '',
-        languageType: (node.data?.languageType as string) || 'Auto',
-        apiKeyConfigured: Boolean(node.data?.apiKeyConfigured || node.data?.apiKey)
-      });
-      setTtsInputParams((node.data?.inputParams as TtsInputParam[]) || []);
-      setTtsOutputParams((node.data?.outputParams as TtsOutputParam[]) || []);
-    } else if (node.data?.type === 'condition') {
-      setConditionConfig({
-        leftType: (node.data?.leftType as 'input' | 'reference') || 'reference',
-        leftValue: (node.data?.leftValue as string) || '',
-        leftReference: (node.data?.leftReference as string) || 'input-default.input',
-        operator: (node.data?.operator as string) || 'contains',
-        rightValue: (node.data?.rightValue as string) || '',
-        caseSensitive: Boolean(node.data?.caseSensitive)
-      });
-    } else if (node.data?.type === 'rag') {
-      const inputParams = (node.data?.inputParams as LlmInputParam[]) || [];
-      const questionParam = inputParams.find(param => param.name === 'question');
-      setRagConfig({
-        knowledgeBaseId: (node.data?.knowledgeBaseId as number) || undefined,
-        configId: (node.data?.configId as number) || undefined,
-        retrievalOnly: Boolean(node.data?.retrievalOnly),
-        questionReference: questionParam?.referenceNode || 'input-default.input',
-        topK: (node.data?.topK as number) || 3,
-        minScore: (node.data?.minScore as number) || 0,
-        contextWindow: (node.data?.contextWindow as number) ?? 1,
-        contextMaxChars: (node.data?.contextMaxChars as number) || 1800,
-        prompt: (node.data?.prompt as string) || ''
-      });
+  const handleNodeClick = useCallback((node: Node) => {
+    if (selectedNode?.id === node.id) {
+      return;
     }
-  };
 
-  // 初始化加载 LLM 全局配置
-  useEffect(() => {
-    fetchLLMGlobalConfigs();
-  }, [fetchLLMGlobalConfigs]);
+    if (selectedNodeDraftSaverRef.current?.() === false) {
+      return;
+    }
+    setSelectedNode(node);
+  }, [selectedNode?.id, setSelectedNode]);
 
   const refreshKnowledgeBases = useCallback(async () => {
     try {
@@ -388,34 +157,6 @@ const EditorPage = () => {
     }
   }, []);
 
-  // 当全局配置异步加载完成后，补齐当前选中节点的展示配置
-  useEffect(() => {
-    if (!selectedNode) return;
-    const nodeType = selectedNode.data?.type;
-    if (!isLlmNodeType(String(nodeType || ''))) return;
-    if (!llmConfig.configId) return;
-
-    const config = llmGlobalConfigs.find(c => c.id === llmConfig.configId);
-    if (!config) return;
-
-    const needsSync =
-      llmConfig.apiUrl !== config.apiUrl ||
-      llmConfig.model !== config.model ||
-      llmConfig.temperature !== config.temperature ||
-      llmConfig.apiKey !== '';
-
-    if (needsSync) {
-      setLlmConfig(prev => ({
-        ...prev,
-        provider: normalizeProviderKey(config.provider),
-        apiUrl: config.apiUrl,
-        apiKey: '',
-        model: config.model,
-        temperature: config.temperature
-      }));
-    }
-  }, [llmGlobalConfigs, selectedNode, llmConfig]);
-
   // 加载指定工作流
   const loadWorkflowById = useCallback(async (workflowId: number) => {
     try {
@@ -427,7 +168,6 @@ const EditorPage = () => {
         setCurrentWorkflowId(workflow.id);
         
         const flowData = JSON.parse(workflow.flowData) as WorkflowCanvasData;
-        console.log('加载的工作流数据:', flowData);
         
         // 加载节点
         const loadedNodes = normalizeWorkflowNodes(flowData.nodes || []);
@@ -443,25 +183,16 @@ const EditorPage = () => {
           },
         }));
         setEdges(loadedEdges);
+        setSelectedNode(null);
+        selectedNodeDraftSaverRef.current = null;
         await refreshPublishStatus(workflow.id);
-        
-        // 恢复输出节点配置
-        const outputNode = loadedNodes.find((node) => node.data?.type === 'output');
-        console.log('找到输出节点:', outputNode);
-        console.log('输出节点配置 - outputParams:', outputNode?.data?.outputParams);
-        console.log('输出节点配置 - responseContent:', outputNode?.data?.responseContent);
 
-        const rawOutputParams = outputNode?.data?.outputParams;
-        const rawResponseContent = outputNode?.data?.responseContent;
-        setOutputParams(Array.isArray(rawOutputParams) ? rawOutputParams as OutputParam[] : []);
-        setResponseContent(typeof rawResponseContent === 'string' ? rawResponseContent : '');
-        
         message.success('工作流加载成功');
       }
     } catch {
       message.error('工作流加载失败');
     }
-  }, [refreshPublishStatus, setCurrentWorkflowId, setEdges, setNodes]);
+  }, [refreshPublishStatus, setCurrentWorkflowId, setEdges, setNodes, setSelectedNode]);
 
   // 从 URL 加载工作流
   useEffect(() => {
@@ -546,8 +277,14 @@ const EditorPage = () => {
   };
 
   // 保存工作流
+  const flushSelectedDraft = () => {
+    return selectedNodeDraftSaverRef.current?.() !== false;
+  };
+
   const handleSave = async (): Promise<number | null> => {
-    selectedNodeDraftSaverRef.current?.();
+    if (!flushSelectedDraft()) {
+      return null;
+    }
     return persistWorkflowSnapshot(
       useWorkflowStore.getState().nodes,
       useWorkflowStore.getState().edges
@@ -564,9 +301,10 @@ const EditorPage = () => {
   };
 
   // 打开调试抽屉
-  const handleOpenDebug = () => {
-    if (!currentWorkflowId) {
-      message.warning('请先保存工作流');
+  const handleOpenDebug = async () => {
+    const workflowId = await handleSave();
+    if (!workflowId) {
+      message.warning('保存工作流失败，无法打开调试面板');
       return;
     }
     setDebugDrawerOpen(true);
@@ -766,23 +504,6 @@ const EditorPage = () => {
     navigate('/login');
   };
 
-  // 添加输出参数
-  const handleAddOutputParam = () => {
-    setOutputParams([...outputParams, { name: '', type: 'input', value: '' }]);
-  };
-
-  // 删除输出参数
-  const handleRemoveOutputParam = (index: number) => {
-    setOutputParams(outputParams.filter((_, i) => i !== index));
-  };
-
-  // 更新输出参数
-  const handleUpdateOutputParam = (index: number, field: keyof OutputParam, value: string) => {
-    const newParams = [...outputParams];
-    newParams[index] = { ...newParams[index], [field]: value };
-    setOutputParams(newParams);
-  };
-
   // 获取可引用的节点列表（输出节点之前的所有节点）
   const getReferenceableNodes = () => {
     return nodes.filter(node => 
@@ -827,7 +548,15 @@ const EditorPage = () => {
     getReferenceableNodes().forEach(node => {
       const nodeType = (node.data?.type as string) || '';
       const nodeLabel = (node.data?.label as string) || node.id;
-      const outputParams = getNodeOutputParams(nodeType);
+      const configuredOutputParams = Array.isArray(node.data?.outputParams)
+        ? node.data.outputParams
+            .map((param) => typeof param === 'object' && param !== null ? String((param as { name?: unknown }).name || '') : '')
+            .filter(Boolean)
+        : [];
+      const outputParams = Array.from(new Set([
+        ...configuredOutputParams,
+        ...getNodeOutputParams(nodeType),
+      ]));
       
       outputParams.forEach(param => {
         params.push({
@@ -837,62 +566,6 @@ const EditorPage = () => {
       });
     });
     return params;
-  };
-
-  // 保存输出节点配置
-  const handleSaveOutputConfig = async () => {
-    if (!selectedNode) return;
-
-    // 验证参数配置
-    for (const param of outputParams) {
-      if (!param.name) {
-        message.warning('请填写所有参数名');
-        return;
-      }
-      if (param.type === 'input' && !param.value) {
-        message.warning('请填写输入值');
-        return;
-      }
-      if (param.type === 'reference' && !param.referenceNode) {
-        message.warning('请选择引用参数');
-        return;
-      }
-    }
-
-    // 验证回答内容配置中的参数引用
-    const paramNames = new Set(outputParams.map(p => p.name));
-    const templateParamRegex = /\{\{(\w+)\}\}/g;
-    const matches = responseContent.matchAll(templateParamRegex);
-    const undefinedParams: string[] = [];
-    
-    for (const match of matches) {
-      const paramName = match[1];
-      if (!paramNames.has(paramName)) {
-        undefinedParams.push(paramName);
-      }
-    }
-    
-    if (undefinedParams.length > 0) {
-      message.warning(`回答内容中引用了未定义的参数: ${undefinedParams.join(', ')}`);
-      return;
-    }
-
-    // 保存到节点的 data 中
-    const updatedData = {
-      ...selectedNode.data,
-      outputParams,
-      responseContent
-    };
-
-    console.log('保存输出节点配置:', {
-      nodeId: selectedNode.id,
-      outputParams,
-      responseContent,
-      updatedData
-    });
-
-    useWorkflowStore.getState().updateNode(selectedNode.id, updatedData);
-    await persistNodeConfig();
   };
 
   // 打开加载工作流对话框
@@ -917,6 +590,9 @@ const EditorPage = () => {
 
   // 加载选中的工作流
   const handleLoadWorkflow = async (workflow: Workflow) => {
+    if (!flushSelectedDraft()) {
+      return;
+    }
     setLoadModalOpen(false);
     hasLoadedRef.current = null;
 
@@ -941,6 +617,8 @@ const EditorPage = () => {
 
           if (currentWorkflowId === workflow.id) {
             setCurrentWorkflowId(null);
+            setSelectedNode(null);
+            selectedNodeDraftSaverRef.current = null;
             navigate('/editor', { replace: true });
           }
 
@@ -955,8 +633,13 @@ const EditorPage = () => {
 
   // 新建工作流
   const handleCreateNew = () => {
+    if (!flushSelectedDraft()) {
+      return;
+    }
     hasLoadedRef.current = null;
     setCurrentWorkflowId(null);
+    setSelectedNode(null);
+    selectedNodeDraftSaverRef.current = null;
     setWorkflowName('企业服务台助手');
     const enterpriseKnowledgeBaseId = knowledgeBases.find(
       (knowledgeBase) => knowledgeBase.name === ENTERPRISE_SERVICE_DESK_KNOWLEDGE_BASE_NAME
@@ -969,392 +652,24 @@ const EditorPage = () => {
     message.info('已创建新工作流');
   };
 
-  // 保存 LLM 节点配置
-  const handleSaveLlmConfig = async () => {
-    if (!selectedNode) return;
-
-    // 验证输入参数
-    for (const param of llmInputParams) {
-      if (!param.name) {
-        message.warning('请填写所有参数名');
-        return;
-      }
-      if (param.type === 'input' && !param.value) {
-        message.warning('请填写输入值');
-        return;
-      }
-      if (param.type === 'reference' && !param.referenceNode) {
-        message.warning('请选择引用参数');
-        return;
-      }
-    }
-
-    // 验证提示词
-    if (!llmConfig.prompt) {
-      message.warning('请填写提示词模板');
-      return;
-    }
-
-    // 验证提示词中的参数引用
-    const paramNames = new Set(llmInputParams.map(p => p.name));
-    const templateParamRegex = /\{\{(\w+)\}\}/g;
-    const matches = llmConfig.prompt.matchAll(templateParamRegex);
-    const undefinedParams: string[] = [];
-
-    for (const match of matches) {
-      const paramName = match[1];
-      if (!paramNames.has(paramName)) {
-        undefinedParams.push(paramName);
-      }
-    }
-
-    if (undefinedParams.length > 0) {
-      message.warning(`提示词模板中引用了未定义的参数: ${undefinedParams.join(', ')}`);
-      return;
-    }
-
-    // 如果没有选择全局配置，需要验证 API 配置
-    if (!llmConfig.configId) {
-      if (!llmConfig.provider) {
-        message.warning('请选择供应商');
-        return;
-      }
-      if (!llmConfig.apiUrl) {
-        message.warning('请选择全局配置或填写 API 地址');
-        return;
-      }
-      if (!llmConfig.apiKey) {
-        message.warning('请选择全局配置或填写 API 密钥');
-        return;
-      }
-      if (!llmConfig.model) {
-        message.warning('请选择全局配置或填写模型名称');
-        return;
-      }
-    }
-
-    const useGlobalConfig = !!llmConfig.configId;
-    const updatedData = {
-      ...selectedNode.data,
-      provider: llmConfig.provider,
-      configId: llmConfig.configId,
-      apiUrl: useGlobalConfig ? '' : llmConfig.apiUrl,
-      apiKey: useGlobalConfig ? '' : llmConfig.apiKey,
-      model: useGlobalConfig ? '' : llmConfig.model,
-      temperature: useGlobalConfig ? 0.7 : llmConfig.temperature,
-      prompt: llmConfig.prompt,
-      skillName: llmConfig.skillName,
-      inputParams: llmInputParams,
-      outputParams: llmOutputParams
-    };
-
-    useWorkflowStore.getState().updateNode(selectedNode.id, updatedData);
-    await persistNodeConfig();
-  };
-
-  // 添加 LLM 输入参数
-  const handleAddLlmInputParam = () => {
-    setLlmInputParams([...llmInputParams, { name: '', type: 'input', value: '' }]);
-  };
-
-  // 删除 LLM 输入参数
-  const handleRemoveLlmInputParam = (index: number) => {
-    setLlmInputParams(llmInputParams.filter((_, i) => i !== index));
-  };
-
-  // 更新 LLM 输入参数
-  const handleUpdateLlmInputParam = (index: number, field: keyof LlmInputParam, value: string) => {
-    const newParams = [...llmInputParams];
-    newParams[index] = { ...newParams[index], [field]: value };
-    setLlmInputParams(newParams);
-  };
-
-  // 保存 TTS 节点配置
-  const handleSaveTtsConfig = async () => {
-    if (!selectedNode) return;
-
-    if (!ttsConfig.apiKey && !ttsConfig.apiKeyConfigured) {
-      message.warning('请填写 API Key');
-      return;
-    }
-    if (!ttsConfig.model) {
-      message.warning('请填写模型名称');
-      return;
-    }
-
-    // 验证输入参数
-    for (const param of ttsInputParams) {
-      if (!param.name) {
-        message.warning('请填写所有参数名');
-        return;
-      }
-      if (param.type === 'input' && !param.value) {
-        message.warning('请填写输入值');
-        return;
-      }
-      if (param.type === 'reference' && !param.referenceNode) {
-        message.warning('请选择引用参数');
-        return;
-      }
-    }
-
-    // 验证输出参数
-    for (const param of ttsOutputParams) {
-      if (!param.name) {
-        message.warning('请填写所有输出参数名');
-        return;
-      }
-    }
-
-    const updatedData = {
-      ...selectedNode.data,
-      provider: ttsConfig.provider,
-      apiUrl: ttsConfig.apiUrl,
-      apiKey: ttsConfig.apiKey,
-      model: ttsConfig.model,
-      voice: ttsConfig.voice,
-      style: ttsConfig.style,
-      languageType: ttsConfig.languageType,
-      apiKeyConfigured: Boolean(ttsConfig.apiKey || ttsConfig.apiKeyConfigured),
-      inputParams: ttsInputParams,
-      outputParams: ttsOutputParams
-    };
-
-    useWorkflowStore.getState().updateNode(selectedNode.id, updatedData);
-    await persistNodeConfig();
-  };
-
-  // 添加 TTS 输入参数
-  const handleAddTtsInputParam = () => {
-    setTtsInputParams([...ttsInputParams, { name: '', type: 'input', value: '' }]);
-  };
-
-  // 删除 TTS 输入参数
-  const handleRemoveTtsInputParam = (index: number) => {
-    setTtsInputParams(ttsInputParams.filter((_, i) => i !== index));
-  };
-
-  // 更新 TTS 输入参数
-  const handleUpdateTtsInputParam = (index: number, field: keyof TtsInputParam, value: string) => {
-    const newParams = [...ttsInputParams];
-    newParams[index] = { ...newParams[index], [field]: value };
-    setTtsInputParams(newParams);
-  };
-
-  // 添加 TTS 输出参数
-  const handleAddTtsOutputParam = () => {
-    setTtsOutputParams([...ttsOutputParams, { name: '', value: '' }]);
-  };
-
-  // 删除 TTS 输出参数
-  const handleRemoveTtsOutputParam = (index: number) => {
-    setTtsOutputParams(ttsOutputParams.filter((_, i) => i !== index));
-  };
-
-  // 更新 TTS 输出参数
-  const handleUpdateTtsOutputParam = (index: number, field: keyof TtsOutputParam, value: string) => {
-    const newParams = [...ttsOutputParams];
-    newParams[index] = { ...newParams[index], [field]: value };
-    setTtsOutputParams(newParams);
-  };
-
-  const handleSaveConditionConfig = async () => {
-    if (!selectedNode) return;
-
-    if (conditionConfig.leftType === 'reference' && !conditionConfig.leftReference) {
-      message.warning('请选择左侧引用参数');
-      return;
-    }
-    if (conditionConfig.leftType === 'input' && !conditionConfig.leftValue) {
-      message.warning('请填写左侧固定值');
-      return;
-    }
-    if (!['empty', 'not_empty'].includes(conditionConfig.operator) && !conditionConfig.rightValue) {
-      message.warning('请填写右侧比较值');
-      return;
-    }
-
-    useWorkflowStore.getState().updateNode(selectedNode.id, {
-      ...selectedNode.data,
-      ...conditionConfig,
-    });
-    await persistNodeConfig();
-  };
-
-  const handleSaveRagConfig = async () => {
-    if (!selectedNode) return;
-    if (!ragConfig.knowledgeBaseId) {
-      message.warning('请选择知识库');
-      return;
-    }
-    if (!ragConfig.retrievalOnly && !ragConfig.configId) {
-      message.warning('请选择用于回答的全局 LLM 配置');
-      return;
-    }
-    if (!ragConfig.questionReference) {
-      message.warning('请选择问题来源');
-      return;
-    }
-
-    useWorkflowStore.getState().updateNode(selectedNode.id, {
-      ...selectedNode.data,
-      knowledgeBaseId: ragConfig.knowledgeBaseId,
-      configId: ragConfig.configId,
-      retrievalOnly: ragConfig.retrievalOnly,
-      topK: ragConfig.topK,
-      minScore: ragConfig.minScore,
-      contextWindow: ragConfig.contextWindow,
-      contextMaxChars: ragConfig.contextMaxChars,
-      prompt: ragConfig.prompt,
-      inputParams: [
-        {
-          name: 'question',
-          type: 'reference',
-          referenceNode: ragConfig.questionReference
-        }
-      ],
-      outputParams: [{ name: 'output', type: 'string' }]
-    });
-    await persistNodeConfig();
-  };
-
-  const handleCreateKnowledgeBase = async () => {
-    if (!newKnowledgeBaseName.trim()) {
-      message.warning('请填写知识库名称');
-      return;
-    }
-    const response = await createKnowledgeBase({
-      name: newKnowledgeBaseName.trim(),
-      description: newKnowledgeBaseDescription.trim()
-    });
-    if (response.code === 200) {
-      message.success('知识库创建成功');
-      setNewKnowledgeBaseName('');
-      setNewKnowledgeBaseDescription('');
-      await refreshKnowledgeBases();
-      setRagConfig({ ...ragConfig, knowledgeBaseId: response.data.id });
-    } else {
-      message.error(response.message || '知识库创建失败');
-    }
-  };
-
-  const handleUploadKnowledgeDocument = async () => {
-    if (!ragConfig.knowledgeBaseId) {
-      message.warning('请先选择知识库');
-      return;
-    }
-    if (!knowledgeContent.trim()) {
-      message.warning('请填写要导入的知识文本');
-      return;
-    }
-    const response = await uploadKnowledgeDocument(ragConfig.knowledgeBaseId, {
-      fileName: knowledgeFileName || 'manual.txt',
-      content: knowledgeContent
-    });
-    if (response.code === 200) {
-      message.success(`文档导入成功，生成 ${response.data.chunkCount} 个切片`);
-      setKnowledgeContent('');
-      await refreshKnowledgeBases();
-    } else {
-      message.error(response.message || '文档导入失败');
-    }
-  };
-
-  const handleUploadKnowledgeLocalFile = async () => {
-    if (!ragConfig.knowledgeBaseId) {
-      message.warning('请先选择知识库');
-      return;
-    }
-    if (!knowledgeLocalFile) {
-      message.warning('请选择本地 txt / markdown 文件');
-      return;
-    }
-    if (knowledgeLocalFile.size > MAX_KNOWLEDGE_UPLOAD_SIZE) {
-      message.error(`文件不能超过 ${MAX_KNOWLEDGE_UPLOAD_SIZE_MB}MB`);
-      return;
-    }
-
-    setKnowledgeFileUploading(true);
-    try {
-      const response = await uploadKnowledgeFile(ragConfig.knowledgeBaseId, knowledgeLocalFile);
-      if (response.code === 200) {
-        message.success(`文件上传成功，生成 ${response.data.chunkCount} 个切片`);
-        setKnowledgeLocalFile(null);
-        await refreshKnowledgeBases();
-      } else {
-        message.error(response.message || '文件上传失败');
-      }
-    } finally {
-      setKnowledgeFileUploading(false);
-    }
-  };
-
-  const handleRebuildKnowledgeEmbeddings = async () => {
-    if (!ragConfig.knowledgeBaseId) {
-      message.warning('请先选择知识库');
-      return;
-    }
-    setKnowledgeReindexing(true);
-    try {
-      const response = await rebuildKnowledgeBaseEmbeddings(ragConfig.knowledgeBaseId);
-      if (response.code === 200) {
-        const result = response.data;
-        message.success(
-          `向量索引重建完成：${result.chunkCount} 个切片，${result.embeddingProvider}/${result.embeddingModel}`
-        );
-        await refreshKnowledgeBases();
-      } else {
-        message.error(response.message || '向量索引重建失败');
-      }
-    } finally {
-      setKnowledgeReindexing(false);
-    }
-  };
-
-  // 添加 LLM 输出参数
-  const handleAddLlmOutputParam = () => {
-    setLlmOutputParams([...llmOutputParams, { name: '', type: 'string', description: '' }]);
-  };
-
-  // 删除 LLM 输出参数
-  const handleRemoveLlmOutputParam = (index: number) => {
-    setLlmOutputParams(llmOutputParams.filter((_, i) => i !== index));
-  };
-
-  // 更新 LLM 输出参数
-  const handleUpdateLlmOutputParam = (index: number, field: keyof LlmOutputParam, value: string) => {
-    const newParams = [...llmOutputParams];
-    newParams[index] = { ...newParams[index], [field]: value };
-    setLlmOutputParams(newParams);
-  };
-
-  const selectedNodeType = String(selectedNode?.data?.type || '');
-  const isGenericLlmNode = selectedNodeType === 'llm';
-  const selectedNodeProvider = resolveSelectedNodeProvider(selectedNode);
-  const availableLlmConfigs = isGenericLlmNode
-    ? llmGlobalConfigs
-    : llmGlobalConfigs.filter(
-        (config) => normalizeProviderKey(config.provider) === selectedNodeProvider
-      );
-
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* 顶部工具栏 */}
-      <div className="bg-white shadow-sm px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold text-gray-800">PaiAgent</h1>
+      <div className="bg-white shadow-sm px-6 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-nowrap items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-800 flex-none">PaiAgent</h1>
           <Input
             value={workflowName}
             onChange={(e) => setWorkflowName(e.target.value)}
-            className="w-64"
+            className="flex-none"
             placeholder="工作流名称"
-            bordered={false}
-            style={{ borderBottom: '2px solid #e5e7eb' }}
+            variant="borderless"
+            style={{ width: 'min(240px, 42vw)', borderBottom: '2px solid #e5e7eb' }}
           />
           <Select
             value={engineType}
             onChange={(value) => setEngineType(value)}
-            className="w-40"
+            className="w-36"
             options={[
               { value: 'dag', label: 'DAG 引擎' },
               { value: 'langgraph', label: 'LangGraph 引擎' }
@@ -1362,26 +677,23 @@ const EditorPage = () => {
           />
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {role === 'ADMIN' && <LLMConfigModal />}
           <Button
             icon={<DatabaseOutlined />}
             onClick={() => navigate('/knowledge')}
-            size="large"
           >
             知识库
           </Button>
           <Button
             icon={<PlusOutlined />}
             onClick={handleCreateNew}
-            size="large"
           >
             新建
           </Button>
           <Button
             icon={<FolderOpenOutlined />}
             onClick={handleOpenLoadModal}
-            size="large"
           >
             加载
           </Button>
@@ -1390,7 +702,6 @@ const EditorPage = () => {
             icon={<SaveOutlined />}
             onClick={handleSave}
             loading={saving}
-            size="large"
           >
             保存
           </Button>
@@ -1398,7 +709,6 @@ const EditorPage = () => {
             icon={<ShareAltOutlined />}
             onClick={handlePublishWorkflow}
             loading={publishing}
-            size="large"
           >
             {publishInfo?.enabled ? '已发布' : '发布'}
           </Button>
@@ -1406,7 +716,6 @@ const EditorPage = () => {
             icon={<ExperimentOutlined />}
             onClick={handleOpenHarness}
             loading={harnessLoading}
-            size="large"
           >
             测试集
           </Button>
@@ -1414,13 +723,13 @@ const EditorPage = () => {
             type="primary"
             icon={<BugOutlined />}
             onClick={handleOpenDebug}
-            disabled={!currentWorkflowId}
-            size="large"
           >
             调试
           </Button>
-          <div className="ml-4 flex items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg">
-            <span className="text-gray-600">👤 {username}{role ? ` / ${role}` : ''}</span>
+          <div className="flex min-w-0 items-center gap-2 px-3 py-1 bg-gray-50 rounded-lg">
+            <span className="max-w-44 truncate text-gray-600" title={`${username}${role ? ` / ${role}` : ''}`}>
+              👤 {username}{role ? ` / ${role}` : ''}
+            </span>
             <Button
               icon={<LogoutOutlined />}
               onClick={handleLogout}
@@ -1457,21 +766,20 @@ const EditorPage = () => {
                 <p className="text-sm text-gray-500 mb-1">节点类型</p>
                 <p className="text-gray-700 font-medium">{String(selectedNode.data?.type || '')}</p>
               </div>
-                
-                <NodeConfigPanel
+
+              <NodeConfigPanel
                 node={selectedNode}
                 onSave={async () => { await persistNodeConfig(); }}
                 getReferenceableParams={getReferenceableParams}
-                registerDraftSaver={(saver) => {
-                  selectedNodeDraftSaverRef.current = saver;
-                }}
+                key={`${currentWorkflowId ?? 'draft'}-${selectedNode.id}`}
+                registerDraftSaver={registerSelectedNodeDraftSaver}
               />
-              </div>
-            ) : (
-              <div className="text-center py-12">
-                <p className="text-gray-400 text-sm">请选择一个节点</p>
-              </div>
-            )}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-400 text-sm">请选择一个节点</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1503,39 +811,39 @@ const EditorPage = () => {
           <Space direction="vertical" className="w-full" size="middle">
             <div>
               <div className="text-sm text-gray-500 mb-2">公开页面</div>
-              <Input
-                readOnly
-                value={toAbsoluteUrl(publishInfo.publicPagePath)}
-                addonBefore={<LinkOutlined />}
-                addonAfter={
-                  <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => copyText(toAbsoluteUrl(publishInfo.publicPagePath))}>
-                    复制
-                  </Button>
-                }
-              />
+              <Space.Compact className="w-full">
+                <Button icon={<LinkOutlined />} />
+                <Input
+                  readOnly
+                  value={toAbsoluteUrl(publishInfo.publicPagePath)}
+                />
+                <Button icon={<CopyOutlined />} onClick={() => copyText(toAbsoluteUrl(publishInfo.publicPagePath))}>
+                  复制
+                </Button>
+              </Space.Compact>
             </div>
             <div>
               <div className="text-sm text-gray-500 mb-2">API POST 调用地址</div>
-              <Input
-                readOnly
-                value={toAbsoluteUrl(publishInfo.publicApiPath)}
-                addonBefore={<ApiOutlined />}
-                addonAfter={
-                  <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => copyText(toAbsoluteUrl(publishInfo.publicApiPath))}>
-                    复制
-                  </Button>
-                }
-              />
+              <Space.Compact className="w-full">
+                <Button icon={<ApiOutlined />} />
+                <Input
+                  readOnly
+                  value={toAbsoluteUrl(publishInfo.publicApiPath)}
+                />
+                <Button icon={<CopyOutlined />} onClick={() => copyText(toAbsoluteUrl(publishInfo.publicApiPath))}>
+                  复制
+                </Button>
+              </Space.Compact>
               <div className="text-sm text-gray-500 mt-3 mb-2">API 访问密钥</div>
-              <Input.Password
-                readOnly
-                value={publishInfo.apiAccessKey || ''}
-                addonAfter={
-                  <Button type="link" size="small" icon={<CopyOutlined />} onClick={() => copyText(publishInfo.apiAccessKey || '')}>
-                    复制
-                  </Button>
-                }
-              />
+              <Space.Compact className="w-full">
+                <Input.Password
+                  readOnly
+                  value={publishInfo.apiAccessKey || ''}
+                />
+                <Button icon={<CopyOutlined />} onClick={() => copyText(publishInfo.apiAccessKey || '')}>
+                  复制
+                </Button>
+              </Space.Compact>
               <div className="text-xs text-gray-500 mt-2">
                 这是给程序调用的接口，浏览器地址栏不能直接打开。请求头需带 X-PaiAgent-Api-Key，POST JSON: {`{ "inputData": "你的输入" }`}
               </div>

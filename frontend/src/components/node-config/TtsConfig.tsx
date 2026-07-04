@@ -65,28 +65,49 @@ export const TtsConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
       voice: ttsConfig.voice,
       style: ttsConfig.style,
       languageType: ttsConfig.languageType,
+      apiKeyConfigured: Boolean(ttsConfig.apiKey || ttsConfig.apiKeyConfigured),
       inputParams: ttsInputParams,
       outputParams: ttsOutputParams
     };
     useWorkflowStore.getState().updateNode(node.id, updatedData);
   }, [node.data, node.id, ttsConfig, ttsInputParams, ttsOutputParams]);
 
-  useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
-
-  const handleSaveTtsConfig = async () => {
+  const validateConfig = useCallback(() => {
     for (const param of ttsInputParams) {
-      if (!param.name) { message.warning('请填写所有输入参数名'); return; }
-      if (param.type === 'input' && !param.value) { message.warning('请填写输入值'); return; }
-      if (param.type === 'reference' && !param.referenceNode) { message.warning('请选择引用参数'); return; }
+      if (!param.name) { message.warning('请填写所有输入参数名'); return false; }
+      if (param.type === 'input' && !param.value) { message.warning('请填写输入值'); return false; }
+      if (param.type === 'reference' && !param.referenceNode) { message.warning('请选择引用参数'); return false; }
     }
     for (const param of ttsOutputParams) {
-      if (!param.name) { message.warning('请填写所有输出参数名'); return; }
+      if (!param.name) { message.warning('请填写所有输出参数名'); return false; }
     }
-    if (!ttsConfig.provider) { message.warning('请选择供应商'); return; }
+    if (!ttsConfig.provider) { message.warning('请选择供应商'); return false; }
+    if (!ttsConfig.apiKey && !ttsConfig.apiKeyConfigured) { message.warning('请填写 API Key'); return false; }
+    if (!ttsConfig.model) { message.warning('请填写模型名称'); return false; }
+    return true;
+  }, [ttsConfig, ttsInputParams, ttsOutputParams]);
 
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
+    }
     commitDraft();
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    return true;
+  }, [commitDraft]);
+
+  useEffect(() => {
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
+
+  const handleSaveTtsConfig = async () => {
+    if (!validateAndCommit()) {
+      return;
+    }
     await onSave();
   };
 
@@ -101,7 +122,7 @@ export const TtsConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
         {ttsInputParams.map((param, index) => (
           <div key={index} className="flex items-start gap-2 mb-3">
             <Input placeholder="参数名(如 text)" value={param.name} onChange={(e) => handleUpdateTtsInputParam(index, 'name', e.target.value)} style={{ width: '100px' }} />
-            <Select value={param.type} onChange={(value: any) => handleUpdateTtsInputParam(index, 'type', value)} style={{ width: '80px' }}>
+            <Select value={param.type} onChange={(value: 'input' | 'reference') => handleUpdateTtsInputParam(index, 'type', value)} style={{ width: '80px' }}>
               <Select.Option value="input">输入</Select.Option>
               <Select.Option value="reference">引用</Select.Option>
             </Select>
@@ -109,7 +130,7 @@ export const TtsConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
               {param.type === 'input' ? (
                 <Input placeholder="输入值" value={param.value} onChange={(e) => handleUpdateTtsInputParam(index, 'value', e.target.value)} />
               ) : (
-                <Select placeholder="选择参数" value={param.referenceNode} onChange={(value: any) => handleUpdateTtsInputParam(index, 'referenceNode', value)} className="w-full">
+                <Select placeholder="选择参数" value={param.referenceNode} onChange={(value: string) => handleUpdateTtsInputParam(index, 'referenceNode', value)} className="w-full">
                   {getReferenceableParams().map(p => <Select.Option key={p.value} value={p.value}>{p.label}</Select.Option>)}
                 </Select>
               )}

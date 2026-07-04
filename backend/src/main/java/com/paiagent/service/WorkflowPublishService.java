@@ -11,7 +11,10 @@ import com.paiagent.dto.PublishedWorkflowInfoResponse;
 import com.paiagent.dto.WorkflowPublishResponse;
 import com.paiagent.engine.EngineSelector;
 import com.paiagent.engine.WorkflowExecutor;
+import com.paiagent.engine.dag.DAGParser;
 import com.paiagent.engine.execution.WorkflowExecutionContextHolder;
+import com.paiagent.engine.model.WorkflowConfig;
+import com.paiagent.engine.validation.WorkflowConfigValidator;
 import com.paiagent.entity.Workflow;
 import com.paiagent.entity.WorkflowPublish;
 import com.paiagent.mapper.WorkflowPublishMapper;
@@ -39,17 +42,26 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
 
     private final ApiKeyCryptoService apiKeyCryptoService;
 
+    private final WorkflowConfigValidator workflowConfigValidator;
+
+    private final DAGParser dagParser;
+
     public WorkflowPublishService(WorkflowService workflowService,
-                                  EngineSelector engineSelector,
-                                  ApiKeyCryptoService apiKeyCryptoService) {
+                                   EngineSelector engineSelector,
+                                   ApiKeyCryptoService apiKeyCryptoService,
+                                   WorkflowConfigValidator workflowConfigValidator,
+                                   DAGParser dagParser) {
         this.workflowService = workflowService;
         this.engineSelector = engineSelector;
         this.apiKeyCryptoService = apiKeyCryptoService;
+        this.workflowConfigValidator = workflowConfigValidator;
+        this.dagParser = dagParser;
     }
 
     @Transactional
     public WorkflowPublishResponse publishWorkflow(Long workflowId, Long userId, boolean admin) {
-        Workflow workflow = workflowService.getAccessibleWorkflow(workflowId, userId, admin);
+        Workflow workflow = workflowService.getWorkflowForExecution(workflowId, userId, admin);
+        validateWorkflowForPublish(workflow);
         WorkflowPublish publish = findByWorkflowId(workflowId);
 
         if (publish == null) {
@@ -76,6 +88,16 @@ public class WorkflowPublishService extends ServiceImpl<WorkflowPublishMapper, W
         }
 
         return toResponse(publish);
+    }
+
+    private void validateWorkflowForPublish(Workflow workflow) {
+        try {
+            WorkflowConfig config = JSON.parseObject(workflow.getFlowData(), WorkflowConfig.class);
+            workflowConfigValidator.validate(config);
+            dagParser.parse(config);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("工作流配置无效，无法发布: " + e.getMessage(), e);
+        }
     }
 
     @Transactional

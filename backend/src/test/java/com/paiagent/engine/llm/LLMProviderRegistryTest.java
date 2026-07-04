@@ -6,6 +6,7 @@ import com.paiagent.entity.LLMGlobalConfig;
 import com.paiagent.service.LLMGlobalConfigService;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.util.HashMap;
@@ -14,6 +15,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -71,22 +73,35 @@ class LLMProviderRegistryTest {
     }
 
     @Test
-    void chatClientFactoryAcceptsKimiAndCustomOpenAICompatibleProviders() {
+    void chatClientFactoryAcceptsPublicOpenAICompatibleProvider() {
         ChatClientFactory factory = new ChatClientFactory();
 
-        ChatClient kimiClient = assertDoesNotThrow(() ->
-                factory.createClient("kimi", null, "sk-test", "kimi-k2.6", 0.7)
-        );
         ChatClient customClient = assertDoesNotThrow(() ->
-                factory.createClient("siliconflow", "https://api.siliconflow.cn", "sk-test", "Qwen/Qwen2.5-7B-Instruct", 0.7)
-        );
-        ChatClient mimoClient = assertDoesNotThrow(() ->
-                factory.createClient("xiaomi mimo", null, "tp-test", "mimo-v2.5-pro", 0.7)
+                factory.createClient("siliconflow", "https://8.8.8.8", "sk-test", "Qwen/Qwen2.5-7B-Instruct", 0.7)
         );
 
-        assertNotNull(kimiClient);
         assertNotNull(customClient);
-        assertNotNull(mimoClient);
+    }
+
+    @Test
+    void chatClientFactoryRejectsPrivateApiUrl() {
+        ChatClientFactory factory = new ChatClientFactory();
+
+        assertThrows(IllegalArgumentException.class, () ->
+                factory.createClient("openai", "http://127.0.0.1:11434/v1", "sk-test", "local-model", 0.7)
+        );
+    }
+
+    @Test
+    void chatClientFactoryAllowsPrivateApiUrlWhenExplicitlyEnabled() {
+        ChatClientFactory factory = new ChatClientFactory();
+        ReflectionTestUtils.setField(factory, "allowPrivateNetworkUrls", true);
+
+        ChatClient localClient = assertDoesNotThrow(() ->
+                factory.createClient("openai", "http://127.0.0.1:11434/v1", "sk-test", "local-model", 0.7)
+        );
+
+        assertNotNull(localClient);
     }
 
     @Test

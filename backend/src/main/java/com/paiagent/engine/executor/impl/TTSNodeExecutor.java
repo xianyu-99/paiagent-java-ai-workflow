@@ -7,6 +7,7 @@ import com.alibaba.dashscope.aigc.multimodalconversation.AudioParameters;
 import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversation;
 import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversationParam;
 import com.alibaba.dashscope.aigc.multimodalconversation.MultiModalConversationResult;
+import com.paiagent.common.security.SafeUrlValidator;
 import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.engine.executor.NodeExecutor;
 import com.paiagent.engine.model.WorkflowNode;
@@ -47,6 +48,7 @@ public class TTSNodeExecutor implements NodeExecutor {
     private static final String DEFAULT_MIMO_VOICE = "mimo_default";
     private static final String DEFAULT_AUDIO_FORMAT = "wav";
     private static final int WAV_MIN_HEADER_LENGTH = 12;
+    private static final int MAX_AUDIO_DOWNLOAD_REDIRECTS = 5;
     
     @Autowired
     private MinioService minioService;
@@ -66,6 +68,9 @@ public class TTSNodeExecutor implements NodeExecutor {
 
     @Value("${MIMO_TTS_VOICE:" + DEFAULT_MIMO_VOICE + "}")
     private String defaultMimoTtsVoice;
+
+    @Value("${paiagent.security.allow-private-network-urls:false}")
+    private boolean allowPrivateNetworkUrls;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -343,8 +348,14 @@ public class TTSNodeExecutor implements NodeExecutor {
         audio.put("voice", voice);
         body.put("audio", audio);
 
+        URI chatCompletionsUri = SafeUrlValidator.requireSafeHttpUri(
+                buildMimoChatCompletionsUrl(apiUrl),
+                "MiMo API URL",
+                allowPrivateNetworkUrls
+        );
+
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(buildMimoChatCompletionsUrl(apiUrl)))
+                .uri(chatCompletionsUri)
                 .timeout(Duration.ofSeconds(90))
                 .header("Authorization", "Bearer " + apiKey)
                 .header("api-key", apiKey)
@@ -681,36 +692,53 @@ public class TTSNodeExecutor implements NodeExecutor {
     }
     
     private byte[] downloadAudio(String audioUrl) throws Exception {
-        URL url = new URL(audioUrl);
-        String protocol = url.getProtocol();
-        if (!"https".equalsIgnoreCase(protocol) && !"http".equalsIgnoreCase(protocol)) {
-            throw new IllegalArgumentException("不支持的音频下载协议: " + protocol);
-        }
+        URI currentUri = SafeUrlValidator.requireSafeHttpUri(audioUrl, "audioUrl", allowPrivateNetworkUrls);
 
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-        conn.setRequestMethod("GET");
-        conn.setConnectTimeout(30000);
-        conn.setReadTimeout(30000);
-        
-        int statusCode = conn.getResponseCode();
-        if (statusCode < 200 || statusCode >= 300) {
-            throw new IllegalStateException("音频下载失败，HTTP 状态码: " + statusCode);
-        }
+        for (int redirectCount = 0; redirectCount <= MAX_AUDIO_DOWNLOAD_REDIRECTS; redirectCount++) {
+            URL url = currentUri.toURL();
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(30000);
+            conn.setReadTimeout(30000);
 
-        try (InputStream is = conn.getInputStream();
-             ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = is.read(buffer)) != -1) {
-                if (baos.size() + bytesRead > MAX_AUDIO_DOWNLOAD_BYTES) {
-                    throw new IllegalStateException("音频文件超过下载大小限制");
+            try {
+                int statusCode = conn.getResponseCode();
+                if (statusCode >= 300 && statusCode < 400) {
+                    String location = conn.getHeaderField("Location");
+                    if (!StringUtils.hasText(location)) {
+                        throw new IllegalStateException("音频下载重定向缺少 Location 响应头");
+                    }
+                    currentUri = currentUri.resolve(location);
+                    currentUri = SafeUrlValidator.requireSafeHttpUri(
+                            currentUri.toString(),
+                            "audioUrl redirect",
+                            allowPrivateNetworkUrls
+                    );
+                    continue;
                 }
-                baos.write(buffer, 0, bytesRead);
+                if (statusCode < 200 || statusCode >= 300) {
+                    throw new IllegalStateException("音频下载失败，HTTP 状态码: " + statusCode);
+                }
+
+                try (InputStream is = conn.getInputStream();
+                     ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+                    byte[] buffer = new byte[8192];
+                    int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) {
+                        if (baos.size() + bytesRead > MAX_AUDIO_DOWNLOAD_BYTES) {
+                            throw new IllegalStateException("音频文件超过下载大小限制");
+                        }
+                        baos.write(buffer, 0, bytesRead);
+                    }
+                    return baos.toByteArray();
+                }
+            } finally {
+                conn.disconnect();
             }
-            return baos.toByteArray();
-        } finally {
-            conn.disconnect();
         }
+
+        throw new IllegalStateException("音频下载重定向次数过多");
     }
     
     private byte[] mergeWavFiles(List<byte[]> audioChunks) throws Exception {

@@ -1,10 +1,12 @@
 package com.paiagent.engine.executor.impl;
 
+import com.sun.net.httpserver.HttpServer;
 import com.paiagent.engine.model.WorkflowNode;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.ByteArrayOutputStream;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -13,6 +15,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TTSNodeExecutorTest {
 
@@ -130,6 +133,63 @@ class TTSNodeExecutorTest {
         int dataSize = readLittleEndianInt(merged, dataOffset - 4);
         assertEquals(5, dataSize);
         assertArrayEquals(new byte[]{1, 2, 3, 4, 5}, Arrays.copyOfRange(merged, dataOffset, dataOffset + dataSize));
+    }
+
+    @Test
+    void shouldRejectPrivateMimoApiUrlBeforeSendingRequest() {
+        TTSNodeExecutor executor = new TTSNodeExecutor();
+
+        assertThrows(IllegalArgumentException.class, () ->
+                ReflectionTestUtils.invokeMethod(
+                        executor,
+                        "synthesizeMimoChunk",
+                        "http://127.0.0.1:8080/v1",
+                        "test-key",
+                        "mimo-v2-tts",
+                        "mimo_default",
+                        "hello"
+                )
+        );
+    }
+
+    @Test
+    void shouldRejectPrivateAudioDownloadUrl() {
+        TTSNodeExecutor executor = new TTSNodeExecutor();
+
+        assertThrows(IllegalArgumentException.class, () ->
+                ReflectionTestUtils.invokeMethod(
+                        executor,
+                        "downloadAudio",
+                        "http://127.0.0.1:8080/audio.wav"
+                )
+        );
+    }
+
+    @Test
+    void shouldRejectUnsafeAudioDownloadRedirectTarget() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/redirect", exchange -> {
+            exchange.getResponseHeaders().add("Location", "http://169.254.169.254/latest/meta-data");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            TTSNodeExecutor executor = new TTSNodeExecutor();
+            ReflectionTestUtils.setField(executor, "allowPrivateNetworkUrls", true);
+            String redirectUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/redirect";
+
+            assertThrows(IllegalArgumentException.class, () ->
+                    ReflectionTestUtils.invokeMethod(
+                            executor,
+                            "downloadAudio",
+                            redirectUrl
+                    )
+            );
+        } finally {
+            server.stop(0);
+        }
     }
 
     private byte[] buildWav(byte[] pcmData, boolean includeExtraChunk) throws Exception {

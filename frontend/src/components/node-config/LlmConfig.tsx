@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Form, Input, Select, Button, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { NodeConfigProps, LlmInputParam, LlmOutputParam } from './types';
@@ -39,12 +39,23 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
   });
   const [llmInputParams, setLlmInputParams] = useState<LlmInputParam[]>([]);
   const [llmOutputParams, setLlmOutputParams] = useState<LlmOutputParam[]>([]);
+  const initializedNodeIdRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+
+  const updateLlmConfig = useCallback((nextConfig: typeof llmConfig) => {
+    dirtyRef.current = true;
+    setLlmConfig(nextConfig);
+  }, []);
 
   useEffect(() => {
     fetchLLMGlobalConfigs();
   }, [fetchLLMGlobalConfigs]);
 
   useEffect(() => {
+    if (initializedNodeIdRef.current === node.id && dirtyRef.current) {
+      return;
+    }
+
     const configId = (node.data?.configId as number) || undefined;
     const matchedGlobalConfig = configId
       ? llmGlobalConfigs.find(c => c.id === configId)
@@ -60,17 +71,26 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
       apiUrl: matchedGlobalConfig?.apiUrl || (node.data?.apiUrl as string) || '',
       apiKey: configId ? '' : (node.data?.apiKey as string) || '',
       model: matchedGlobalConfig?.model || (node.data?.model as string) || '',
-      temperature: matchedGlobalConfig?.temperature || (node.data?.temperature as number) || 0.7,
+      temperature: matchedGlobalConfig?.temperature ?? (node.data?.temperature as number | undefined) ?? 0.7,
       prompt: (node.data?.prompt as string) || (node.data?.systemPrompt as string) || '',
       skillName: (node.data?.skillName as string) || ''
     });
     setLlmInputParams((node.data?.inputParams as LlmInputParam[]) || []);
     setLlmOutputParams((node.data?.outputParams as LlmOutputParam[]) || []);
+    initializedNodeIdRef.current = node.id;
+    dirtyRef.current = false;
   }, [node, llmGlobalConfigs]);
 
-  const handleAddLlmInputParam = () => setLlmInputParams([...llmInputParams, { name: '', type: 'input', value: '' }]);
-  const handleRemoveLlmInputParam = (index: number) => setLlmInputParams(llmInputParams.filter((_, i) => i !== index));
+  const handleAddLlmInputParam = () => {
+    dirtyRef.current = true;
+    setLlmInputParams([...llmInputParams, { name: '', type: 'input', value: '' }]);
+  };
+  const handleRemoveLlmInputParam = (index: number) => {
+    dirtyRef.current = true;
+    setLlmInputParams(llmInputParams.filter((_, i) => i !== index));
+  };
   const handleUpdateLlmInputParam = (index: number, field: keyof LlmInputParam, value: string) => {
+    dirtyRef.current = true;
     const newParams = [...llmInputParams];
     if (field === 'type' && value === 'input') {
       newParams[index] = { ...newParams[index], [field]: value, referenceNode: undefined, value: '' };
@@ -82,9 +102,16 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
     setLlmInputParams(newParams);
   };
 
-  const handleAddLlmOutputParam = () => setLlmOutputParams([...llmOutputParams, { name: '', type: 'string', description: '' }]);
-  const handleRemoveLlmOutputParam = (index: number) => setLlmOutputParams(llmOutputParams.filter((_, i) => i !== index));
+  const handleAddLlmOutputParam = () => {
+    dirtyRef.current = true;
+    setLlmOutputParams([...llmOutputParams, { name: '', type: 'string', description: '' }]);
+  };
+  const handleRemoveLlmOutputParam = (index: number) => {
+    dirtyRef.current = true;
+    setLlmOutputParams(llmOutputParams.filter((_, i) => i !== index));
+  };
   const handleUpdateLlmOutputParam = (index: number, field: keyof LlmOutputParam, value: string) => {
+    dirtyRef.current = true;
     const newParams = [...llmOutputParams];
     newParams[index] = { ...newParams[index], [field]: value };
     setLlmOutputParams(newParams);
@@ -93,7 +120,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
   const shouldReplaceProviderDefault = (currentValue: string, previousProvider: string, defaultResolver: (provider: string) => string) => {
     if (!currentValue) return true;
     if (Boolean(previousProvider) && currentValue === defaultResolver(previousProvider)) return true;
-    return SUPPORTED_LLM_PROVIDERS.some((provider: any) => currentValue === defaultResolver(provider));
+    return SUPPORTED_LLM_PROVIDERS.some((provider: string) => currentValue === defaultResolver(provider));
   };
 
   const commitDraft = useCallback(() => {
@@ -115,18 +142,13 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
     useWorkflowStore.getState().updateNode(node.id, updatedData);
   }, [llmConfig, llmInputParams, llmOutputParams, node.data, node.id]);
 
-  useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
-
-  const handleSaveConfig = async () => {
-    // 验证逻辑
+  const validateConfig = useCallback(() => {
     for (const param of llmInputParams) {
-      if (!param.name) { message.warning('请填写所有参数名'); return; }
-      if (param.type === 'input' && !param.value) { message.warning('请填写输入值'); return; }
-      if (param.type === 'reference' && !param.referenceNode) { message.warning('请选择引用参数'); return; }
+      if (!param.name) { message.warning('请填写所有参数名'); return false; }
+      if (param.type === 'input' && !param.value) { message.warning('请填写输入值'); return false; }
+      if (param.type === 'reference' && !param.referenceNode) { message.warning('请选择引用参数'); return false; }
     }
-    if (!llmConfig.prompt) { message.warning('请填写提示词模板'); return; }
+    if (!llmConfig.prompt) { message.warning('请填写提示词模板'); return false; }
 
     const paramNames = new Set(llmInputParams.map(p => p.name));
     const templateParamRegex = /\{\{(\w+)\}\}/g;
@@ -137,17 +159,42 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
     }
     if (undefinedParams.length > 0) {
       message.warning(`提示词模板中引用了未定义的参数: ${undefinedParams.join(', ')}`);
-      return;
+      return false;
     }
 
     if (!llmConfig.configId) {
-      if (!llmConfig.provider) { message.warning('请选择供应商'); return; }
-      if (!llmConfig.apiUrl) { message.warning('请填写 API 地址'); return; }
-      if (!llmConfig.apiKey) { message.warning('请填写 API 密钥'); return; }
-      if (!llmConfig.model) { message.warning('请填写模型名称'); return; }
+      if (!llmConfig.provider) { message.warning('请选择供应商'); return false; }
+      if (!llmConfig.apiUrl) { message.warning('请填写 API 地址'); return false; }
+      if (!llmConfig.apiKey) { message.warning('请填写 API 密钥'); return false; }
+      if (!llmConfig.model) { message.warning('请填写模型名称'); return false; }
     }
 
+    return true;
+  }, [llmConfig, llmInputParams]);
+
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
+    }
     commitDraft();
+    dirtyRef.current = false;
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    dirtyRef.current = false;
+    return true;
+  }, [commitDraft]);
+
+  useEffect(() => {
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
+
+  const handleSaveConfig = async () => {
+    if (!validateAndCommit()) {
+      return;
+    }
     await onSave();
   };
 
@@ -157,7 +204,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
 
   const availableLlmConfigs = isGenericLlmNode
     ? llmGlobalConfigs
-    : llmGlobalConfigs.filter((config: any) => normalizeProviderKey(config.provider) === selectedNodeProvider);
+    : llmGlobalConfigs.filter((config: { provider: string, configName: string, id: number }) => normalizeProviderKey(config.provider) === selectedNodeProvider);
 
   const providerOptions = SUPPORTED_LLM_PROVIDERS.map(p => ({ value: p, label: getProviderLabel(p) }));
 
@@ -172,7 +219,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
         {llmInputParams.map((param, index) => (
           <div key={index} className="flex items-start gap-2 mb-3">
             <Input placeholder="参数名" value={param.name} onChange={(e) => handleUpdateLlmInputParam(index, 'name', e.target.value)} style={{ width: '90px' }} />
-            <Select value={param.type} onChange={(value: any) => handleUpdateLlmInputParam(index, 'type', value)} style={{ width: '70px' }}>
+            <Select value={param.type} onChange={(value: 'input' | 'reference') => handleUpdateLlmInputParam(index, 'type', value)} style={{ width: '70px' }}>
               <Select.Option value="input">输入</Select.Option>
               <Select.Option value="reference">引用</Select.Option>
             </Select>
@@ -180,7 +227,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
               {param.type === 'input' ? (
                 <Input placeholder="输入值" value={param.value} onChange={(e) => handleUpdateLlmInputParam(index, 'value', e.target.value)} />
               ) : (
-                <Select placeholder="选择参数" value={param.referenceNode} onChange={(value: any) => handleUpdateLlmInputParam(index, 'referenceNode', value)} className="w-full">
+                <Select placeholder="选择参数" value={param.referenceNode} onChange={(value: string) => handleUpdateLlmInputParam(index, 'referenceNode', value)} className="w-full">
                   {getReferenceableParams().map(p => <Select.Option key={p.value} value={p.value}>{p.label}</Select.Option>)}
                 </Select>
               )}
@@ -213,7 +260,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
           rows={12}
           placeholder="输入提示词模板，使用 {{参数名}} 引用输入参数"
           value={llmConfig.prompt}
-          onChange={(e) => setLlmConfig({...llmConfig, prompt: e.target.value})}
+          onChange={(e) => updateLlmConfig({...llmConfig, prompt: e.target.value})}
           style={{ fontFamily: 'monospace', fontSize: '12px' }}
         />
       </Form.Item>
@@ -221,11 +268,11 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
       <Form.Item label="全局配置">
         <Select
           value={llmConfig.configId}
-          onChange={(value: any) => {
+          onChange={(value: number) => {
             if (value) {
               const config = llmGlobalConfigs.find(c => c.id === value);
               if (config) {
-                setLlmConfig({
+                updateLlmConfig({
                   ...llmConfig,
                   provider: normalizeProviderKey(config.provider),
                   configId: value,
@@ -236,7 +283,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
                 });
               }
             } else {
-              setLlmConfig({
+              updateLlmConfig({
                 ...llmConfig,
                 provider: isGenericLlmNode ? '' : selectedNodeProvider,
                 configId: undefined,
@@ -261,35 +308,45 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
               <Select
                 value={llmConfig.provider || undefined}
                 options={providerOptions} allowClear
-                onChange={(value: any) => {
+                onChange={(value: string) => {
                   if (!value) {
-                    setLlmConfig({ ...llmConfig, provider: '', apiUrl: '', model: '' });
+                    updateLlmConfig({ ...llmConfig, provider: '', apiUrl: '', model: '' });
                     return;
                   }
                   const previousProvider = llmConfig.provider;
                   const defaultBaseUrl = getProviderDefaultBaseUrl(value);
                   const defaultModel = DEFAULT_PROVIDER_MODELS[value] || '';
-                  setLlmConfig({
+                  updateLlmConfig({
                     ...llmConfig,
                     provider: value,
                     apiUrl: shouldReplaceProviderDefault(llmConfig.apiUrl, previousProvider, getProviderDefaultBaseUrl) ? defaultBaseUrl : llmConfig.apiUrl,
-                    model: shouldReplaceProviderDefault(llmConfig.model, previousProvider, (p: any) => DEFAULT_PROVIDER_MODELS[p] || '') ? defaultModel : llmConfig.model
+                    model: shouldReplaceProviderDefault(llmConfig.model, previousProvider, (p: string) => DEFAULT_PROVIDER_MODELS[p] || '') ? defaultModel : llmConfig.model
                   });
                 }}
               />
             </Form.Item>
           )}
           <Form.Item label="API 地址" required>
-            <Input value={llmConfig.apiUrl} onChange={(e) => setLlmConfig({...llmConfig, apiUrl: e.target.value})} />
+            <Input value={llmConfig.apiUrl} onChange={(e) => updateLlmConfig({...llmConfig, apiUrl: e.target.value})} />
           </Form.Item>
           <Form.Item label="API 密钥" required>
-            <Input.Password value={llmConfig.apiKey} onChange={(e) => setLlmConfig({...llmConfig, apiKey: e.target.value})} />
+            <Input.Password value={llmConfig.apiKey} onChange={(e) => updateLlmConfig({...llmConfig, apiKey: e.target.value})} />
           </Form.Item>
           <Form.Item label="模型名称" required>
-            <Input placeholder={getProviderModelPlaceholder(llmConfig.provider)} value={llmConfig.model} onChange={(e) => setLlmConfig({...llmConfig, model: e.target.value})} />
+            <Input placeholder={getProviderModelPlaceholder(llmConfig.provider)} value={llmConfig.model} onChange={(e) => updateLlmConfig({...llmConfig, model: e.target.value})} />
           </Form.Item>
           <Form.Item label="温度">
-            <Input type="number" step="0.1" min="0" max="2" value={llmConfig.temperature} onChange={(e) => setLlmConfig({...llmConfig, temperature: parseFloat(e.target.value) || 0.7})} />
+            <Input
+              type="number"
+              step="0.1"
+              min="0"
+              max="2"
+              value={llmConfig.temperature}
+              onChange={(e) => {
+                const nextTemperature = parseFloat(e.target.value);
+                updateLlmConfig({...llmConfig, temperature: Number.isNaN(nextTemperature) ? 0.7 : nextTemperature});
+              }}
+            />
           </Form.Item>
         </>
       )}
@@ -304,7 +361,7 @@ export const LlmConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
       )}
 
       <Form.Item label="技能 (Skill)">
-        <SkillSelector value={llmConfig.skillName} onChange={(value: any) => setLlmConfig({...llmConfig, skillName: value || ''})} />
+        <SkillSelector value={llmConfig.skillName} onChange={(value) => updateLlmConfig({...llmConfig, skillName: value || ''})} />
       </Form.Item>
 
       <Button type="primary" block onClick={handleSaveConfig}>

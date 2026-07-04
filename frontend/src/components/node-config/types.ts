@@ -1,10 +1,12 @@
 import { Node } from '@xyflow/react';
 
+export type DraftSaver = () => boolean;
+
 export interface NodeConfigProps {
   node: Node;
   onSave: () => Promise<void>;
   getReferenceableParams: () => { label: string; value: string }[];
-  registerDraftSaver?: (saver: (() => void) | null) => void;
+  registerDraftSaver?: (saver: DraftSaver | null) => void;
 }
 
 export interface OutputParam {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Form, Input, Select, Button, Checkbox } from 'antd';
+import { Form, Input, Select, Button, Checkbox, message } from 'antd';
 import { NodeConfigProps, ConditionConfig as ConditionConfigType } from './types';
 import { useWorkflowStore } from '../../store/workflowStore';
 
@@ -36,12 +36,43 @@ export const ConditionConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRe
     });
   }, [conditionConfig, node.data, node.id]);
 
+  const validateConfig = useCallback(() => {
+    if (conditionConfig.leftType === 'reference' && !conditionConfig.leftReference) {
+      message.warning('请选择左侧引用参数');
+      return false;
+    }
+    if (conditionConfig.leftType === 'input' && !conditionConfig.leftValue) {
+      message.warning('请填写左侧固定值');
+      return false;
+    }
+    if (!['empty', 'not_empty'].includes(conditionConfig.operator) && !conditionConfig.rightValue) {
+      message.warning('请填写右侧比较值');
+      return false;
+    }
+    return true;
+  }, [conditionConfig]);
+
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
+    }
+    commitDraft();
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    return true;
+  }, [commitDraft]);
+
   useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
 
   const handleSaveConditionConfig = async () => {
-    commitDraft();
+    if (!validateAndCommit()) {
+      return;
+    }
     await onSave();
   };
 
@@ -66,10 +97,10 @@ export const ConditionConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRe
           <Select
             placeholder="选择要判断的上游输出"
             value={conditionConfig.leftReference}
-            onChange={(value: any) => setConditionConfig({ ...conditionConfig, leftReference: value })}
+            onChange={(value: string) => setConditionConfig({ ...conditionConfig, leftReference: value })}
             style={{ width: '100%' }}
           >
-            {[{ label: '运行时.loopIteration', value: 'loopIteration' }, ...getReferenceableParams()].map((p: any) => (
+            {[{ label: '运行时.loopIteration', value: 'loopIteration' }, ...getReferenceableParams()].map((p: { label: string, value: string }) => (
               <Select.Option key={p.value} value={p.value}>
                 {p.label}
               </Select.Option>
@@ -89,7 +120,7 @@ export const ConditionConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRe
       <Form.Item label="判断条件" required>
         <Select
           value={conditionConfig.operator}
-          onChange={(value: any) => setConditionConfig({ ...conditionConfig, operator: value })}
+          onChange={(value: string) => setConditionConfig({ ...conditionConfig, operator: value })}
         >
           <Select.Option value="equals">等于</Select.Option>
           <Select.Option value="not_equals">不等于</Select.Option>

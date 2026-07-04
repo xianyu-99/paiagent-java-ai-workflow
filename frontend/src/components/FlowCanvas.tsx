@@ -26,8 +26,101 @@ interface FlowCanvasProps {
   onNodeClick: (node: Node) => void;
 }
 
+const DEFAULT_NODE_WIDTH = 190;
+const DEFAULT_NODE_HEIGHT = 72;
+const CONDITION_NODE_SIZE = 178;
+const DEFAULT_NODE_STYLE = {
+  width: DEFAULT_NODE_WIDTH,
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+};
+
+const withNodePresentation = (node: Node): Node => {
+  if (node.type === 'condition') {
+    return node;
+  }
+
+  return {
+    ...node,
+    style: {
+      ...node.style,
+      ...DEFAULT_NODE_STYLE,
+    },
+  };
+};
+
+const withNodesPresentation = (nodes: Node[]) => nodes.map(withNodePresentation);
+
+const getNodeLabel = (data: NodeProps['data'], fallback: string) => {
+  return typeof data?.label === 'string' && data.label.trim() ? data.label : fallback;
+};
+
+const getNodeType = (data: NodeProps['data']) => {
+  return typeof data?.type === 'string' ? data.type : 'node';
+};
+
+const getNodeAccentClass = (type: string) => {
+  switch (type) {
+    case 'input':
+      return 'border-emerald-400 bg-emerald-50 text-emerald-700';
+    case 'output':
+      return 'border-sky-400 bg-sky-50 text-sky-700';
+    case 'llm':
+    case 'agent':
+      return 'border-violet-400 bg-violet-50 text-violet-700';
+    case 'rag':
+      return 'border-amber-400 bg-amber-50 text-amber-700';
+    case 'tts':
+    case 'media':
+      return 'border-rose-400 bg-rose-50 text-rose-700';
+    default:
+      return 'border-slate-300 bg-slate-50 text-slate-600';
+  }
+};
+
+const DefaultWorkflowNode = ({ data, selected }: NodeProps) => {
+  const type = getNodeType(data);
+  const label = getNodeLabel(data, type);
+  const canReceiveInput = type !== 'input';
+  const canEmitOutput = type !== 'output';
+
+  return (
+    <div
+      className={`relative flex min-h-[72px] w-[190px] items-center rounded-md border-2 bg-white px-4 py-3 shadow-sm transition-shadow ${
+        selected ? 'border-blue-500 shadow-blue-100' : 'border-gray-200'
+      }`}
+    >
+      {canReceiveInput && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          style={{ left: -6, background: '#111827' }}
+        />
+      )}
+      <div className="min-w-0">
+        <div
+          className={`mb-1 inline-flex max-w-full rounded px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-none ${getNodeAccentClass(type)}`}
+        >
+          {type}
+        </div>
+        <div className="text-sm font-semibold leading-snug text-gray-900 break-words">
+          {label}
+        </div>
+      </div>
+      {canEmitOutput && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          style={{ right: -6, background: '#2563eb' }}
+        />
+      )}
+    </div>
+  );
+};
+
 const ConditionNode = ({ data, selected }: NodeProps) => {
-  const label = typeof data?.label === 'string' ? data.label : '条件分支';
+  const label = getNodeLabel(data, '条件分支');
 
   return (
     <div className="relative w-[178px] h-[178px] flex items-center justify-center overflow-visible">
@@ -65,6 +158,7 @@ const ConditionNode = ({ data, selected }: NodeProps) => {
 };
 
 const nodeTypes = {
+  default: DefaultWorkflowNode,
   condition: ConditionNode,
 };
 
@@ -72,16 +166,14 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
   const { nodes: storeNodes, edges: storeEdges, setNodes: setStoreNodes, setEdges: setStoreEdges } = useWorkflowStore();
   const { screenToFlowPosition } = useReactFlow();
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(storeNodes);
+  const [nodes, setNodes, onNodesChange] = useNodesState(withNodesPresentation(storeNodes));
   const [edges, setEdges, onEdgesChange] = useEdgesState(storeEdges);
 
   useEffect(() => {
-    console.log('Store nodes changed:', storeNodes);
-    setNodes(storeNodes);
+    setNodes(withNodesPresentation(storeNodes));
   }, [storeNodes, setNodes]);
 
   useEffect(() => {
-    console.log('Store edges changed:', storeEdges);
     const edgesWithMarkers = storeEdges.map(edge => ({
       ...edge,
       markerEnd: {
@@ -94,6 +186,14 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
   }, [storeEdges, setEdges]);
 
   const handleNodesChange: OnNodesChange = useCallback((changes) => {
+    const removedNodeIds = changes
+      .filter((change) => change.type === 'remove')
+      .map((change) => change.id);
+    const selectedNode = useWorkflowStore.getState().selectedNode;
+    if (selectedNode && removedNodeIds.includes(selectedNode.id)) {
+      useWorkflowStore.getState().setSelectedNode(null);
+    }
+
     onNodesChange(changes);
     setTimeout(() => {
       setNodes((currentNodes) => {
@@ -114,7 +214,6 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
   }, [onEdgesChange, setEdges, setStoreEdges]);
 
   const handleConnect: OnConnect = useCallback((connection: Connection) => {
-    console.log('Connection created:', connection);
     setEdges((eds) => {
       const newEdge = {
         ...connection,
@@ -124,7 +223,6 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
           height: 20,
         },
       };
-      console.log('New edge:', newEdge);
       const updatedEdges = addEdge(newEdge, eds);
       setStoreEdges(updatedEdges);
       return updatedEdges;
@@ -144,9 +242,11 @@ const FlowCanvasContent = ({ onNodeClick }: FlowCanvasProps) => {
         x: event.clientX,
         y: event.clientY,
       });
+      const nodeWidth = type === 'condition' ? CONDITION_NODE_SIZE : DEFAULT_NODE_WIDTH;
+      const nodeHeight = type === 'condition' ? CONDITION_NODE_SIZE : DEFAULT_NODE_HEIGHT;
       const position = {
-        x: flowPosition.x - (type === 'condition' ? 89 : 75),
-        y: flowPosition.y - (type === 'condition' ? 89 : 25),
+        x: flowPosition.x - nodeWidth / 2,
+        y: flowPosition.y - nodeHeight / 2,
       };
 
       const newNode: Node = {

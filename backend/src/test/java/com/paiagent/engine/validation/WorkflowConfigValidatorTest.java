@@ -22,7 +22,11 @@ class WorkflowConfigValidatorTest {
             new NodeExecutorFactory(List.of(
                     new StubExecutor("input"),
                     new StubExecutor("output"),
-                    new StubExecutor("condition")
+                    new StubExecutor("condition"),
+                    new StubExecutor("llm"),
+                    new StubExecutor("rag"),
+                    new StubExecutor("media"),
+                    new StubExecutor("tts")
             ))
     );
 
@@ -158,6 +162,114 @@ class WorkflowConfigValidatorTest {
     @Test
     void shouldTreatNullEdgesAsEmpty() {
         WorkflowConfig config = config(List.of(node("input-1", "input")), null);
+
+        assertDoesNotThrow(() -> validator.validate(config));
+    }
+
+    @Test
+    void shouldRejectLlmNodeWithoutModelConfiguration() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("llm-1", "llm", Map.of("type", "llm", "prompt", "hello")),
+                        node("output-1", "output")
+                ),
+                List.of(
+                        edge("e1", "input-1", "llm-1"),
+                        edge("e2", "llm-1", "output-1")
+                )
+        );
+
+        WorkflowValidationException error = assertThrows(
+                WorkflowValidationException.class,
+                () -> validator.validate(config)
+        );
+
+        assertTrue(error.getMessage().contains("missing llm provider"));
+    }
+
+    @Test
+    void shouldRejectMediaNodeWithoutApiKey() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("media-1", "media", Map.of(
+                                "type", "media",
+                                "apiUrl", "https://api.example.com/v1/images",
+                                "model", "image-model"
+                        )),
+                        node("output-1", "output")
+                ),
+                List.of(
+                        edge("e1", "input-1", "media-1"),
+                        edge("e2", "media-1", "output-1")
+                )
+        );
+
+        WorkflowValidationException error = assertThrows(
+                WorkflowValidationException.class,
+                () -> validator.validate(config)
+        );
+
+        assertTrue(error.getMessage().contains("missing media API key"));
+    }
+
+    @Test
+    void shouldRejectRagNodeWithoutKnowledgeBase() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("rag-1", "rag", Map.of(
+                                "type", "rag",
+                                "configId", 7L,
+                                "inputParams", List.of(Map.of(
+                                        "name", "question",
+                                        "type", "reference",
+                                        "referenceNode", "input-1.input"
+                                ))
+                        )),
+                        node("output-1", "output")
+                ),
+                List.of(
+                        edge("e1", "input-1", "rag-1"),
+                        edge("e2", "rag-1", "output-1")
+                )
+        );
+
+        WorkflowValidationException error = assertThrows(
+                WorkflowValidationException.class,
+                () -> validator.validate(config)
+        );
+
+        assertTrue(error.getMessage().contains("missing knowledgeBaseId"));
+    }
+
+    @Test
+    void shouldAcceptRuntimeConfiguredNodes() {
+        WorkflowConfig config = config(
+                List.of(
+                        node("input-1", "input"),
+                        node("llm-1", "llm", Map.of(
+                                "type", "llm",
+                                "prompt", "hello",
+                                "provider", "openai",
+                                "apiUrl", "https://api.example.com",
+                                "apiKey", "sk-test",
+                                "model", "gpt-test"
+                        )),
+                        node("tts-1", "tts", Map.of(
+                                "type", "tts",
+                                "apiKeyConfigured", true,
+                                "model", "tts-test"
+                        )),
+                        node("output-1", "output")
+                ),
+                List.of(
+                        edge("e1", "input-1", "llm-1"),
+                        edge("e2", "llm-1", "tts-1"),
+                        edge("e3", "tts-1", "output-1")
+                )
+        );
 
         assertDoesNotThrow(() -> validator.validate(config));
     }

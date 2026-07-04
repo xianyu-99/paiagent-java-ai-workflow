@@ -57,7 +57,7 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
   }, [fetchLLMGlobalConfigs, refreshKnowledgeBases]);
 
   useEffect(() => {
-    const inputParams = (node.data?.inputParams as any[]) || [];
+    const inputParams = (node.data?.inputParams as { name: string; referenceNode?: string }[]) || [];
     const questionParam = inputParams.find(param => param.name === 'question');
     setRagConfig({
       knowledgeBaseId: (node.data?.knowledgeBaseId as number) || undefined,
@@ -195,17 +195,39 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
     useWorkflowStore.getState().updateNode(node.id, updatedData);
   }, [llmGlobalConfigs, node.data, node.id, ragConfig]);
 
+  const validateConfig = useCallback(() => {
+    if (!ragConfig.knowledgeBaseId) { message.warning('请选择知识库'); return false; }
+    if (!ragConfig.retrievalOnly && !ragConfig.configId) {
+      message.warning('请选择全局大模型配置（用于总结回答）'); return false;
+    }
+    if (!ragConfig.questionReference) {
+      message.warning('请选择问题来源');
+      return false;
+    }
+    return true;
+  }, [ragConfig]);
+
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
+    }
+    commitDraft();
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    return true;
+  }, [commitDraft]);
+
   useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
 
   const handleSaveRagConfig = async () => {
-    if (!ragConfig.knowledgeBaseId) { message.warning('请选择知识库'); return; }
-    if (!ragConfig.retrievalOnly && !ragConfig.configId) {
-      message.warning('请选择全局大模型配置（用于总结回答）'); return;
+    if (!validateAndCommit()) {
+      return;
     }
-
-    commitDraft();
     await onSave();
   };
 
@@ -219,7 +241,7 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
         <Select
           placeholder="选择知识库"
           value={ragConfig.knowledgeBaseId}
-          onChange={(value: any) => setRagConfig({ ...ragConfig, knowledgeBaseId: value })}
+          onChange={(value: number) => setRagConfig({ ...ragConfig, knowledgeBaseId: value })}
         >
           {knowledgeBases.map(kb => (
             <Select.Option key={kb.id} value={kb.id}>
@@ -286,9 +308,9 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
         <Select
           placeholder="选择用户问题来源"
           value={ragConfig.questionReference}
-          onChange={(value: any) => setRagConfig({ ...ragConfig, questionReference: value })}
+          onChange={(value: string) => setRagConfig({ ...ragConfig, questionReference: value })}
         >
-          {getReferenceableParams().map((p: any) => (
+          {getReferenceableParams().map((p: { label: string, value: string }) => (
             <Select.Option key={p.value} value={p.value}>{p.label}</Select.Option>
           ))}
         </Select>
@@ -328,7 +350,7 @@ export const RagConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenc
           <Form.Item label="LLM 总结模型" required>
             <Select
               value={ragConfig.configId}
-              onChange={(value: any) => setRagConfig({ ...ragConfig, configId: value })}
+              onChange={(value: number) => setRagConfig({ ...ragConfig, configId: value })}
               placeholder="选择一个全局模型配置"
               allowClear
             >

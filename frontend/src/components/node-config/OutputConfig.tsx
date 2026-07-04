@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Form, Input, Select, Button } from 'antd';
+import { Form, Input, Select, Button, message } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { NodeConfigProps, OutputParam } from './types';
 import { useWorkflowStore } from '../../store/workflowStore';
@@ -42,12 +42,59 @@ export const OutputConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefer
     useWorkflowStore.getState().updateNode(node.id, updatedData);
   }, [node.data, node.id, outputParams, responseContent]);
 
+  const validateConfig = useCallback(() => {
+    for (const param of outputParams) {
+      if (!param.name) {
+        message.warning('请填写所有参数名');
+        return false;
+      }
+      if (param.type === 'input' && !param.value) {
+        message.warning('请填写输入值');
+        return false;
+      }
+      if (param.type === 'reference' && !param.referenceNode) {
+        message.warning('请选择引用参数');
+        return false;
+      }
+    }
+
+    const paramNames = new Set(outputParams.map(p => p.name));
+    const templateParamRegex = /\{\{(\w+)\}\}/g;
+    const undefinedParams: string[] = [];
+    for (const match of responseContent.matchAll(templateParamRegex)) {
+      if (!paramNames.has(match[1])) {
+        undefinedParams.push(match[1]);
+      }
+    }
+    if (undefinedParams.length > 0) {
+      message.warning(`回答内容中引用了未定义的参数: ${undefinedParams.join(', ')}`);
+      return false;
+    }
+
+    return true;
+  }, [outputParams, responseContent]);
+
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
+    }
+    commitDraft();
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    return true;
+  }, [commitDraft]);
+
   useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
 
   const handleSaveOutputConfig = async () => {
-    commitDraft();
+    if (!validateAndCommit()) {
+      return;
+    }
     await onSave();
   };
 
@@ -80,7 +127,7 @@ export const OutputConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefer
             <div>
               <Select
                 value={param.type}
-                onChange={(value: any) => handleUpdateOutputParam(index, 'type', value)}
+                onChange={(value: 'input' | 'reference') => handleUpdateOutputParam(index, 'type', value)}
                 style={{ width: '80px' }}
               >
                 <Select.Option value="input">输入</Select.Option>
@@ -98,7 +145,7 @@ export const OutputConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefer
                 <Select
                   placeholder="选择参数"
                   value={param.referenceNode}
-                  onChange={(value: any) => handleUpdateOutputParam(index, 'referenceNode', value)}
+                  onChange={(value: string) => handleUpdateOutputParam(index, 'referenceNode', value)}
                   className="w-full"
                 >
                   {getReferenceableParams().map(p => (

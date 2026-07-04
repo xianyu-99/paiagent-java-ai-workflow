@@ -111,6 +111,9 @@ public class LLMConfigController {
     }
 
     private LLMGlobalConfig maskConfig(LLMGlobalConfig config) {
+        if (config == null) {
+            return null;
+        }
         LLMGlobalConfig copy = new LLMGlobalConfig();
         BeanUtils.copyProperties(config, copy);
         copy.setApiKey("");

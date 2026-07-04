@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Form, Input, Select, Button, message, Space, Card, Divider } from 'antd';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Form, Input, Select, Button, message, Card } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { NodeConfigProps } from './types';
 import { useWorkflowStore } from '../../store/workflowStore';
 
 export const MediaConfig: React.FC<NodeConfigProps> = ({ node, onSave, getReferenceableParams, registerDraftSaver }) => {
-  const [config, setConfig] = useState({
+  const [config, setConfigState] = useState({
     provider: 'openai',
     apiUrl: 'https://api.openai.com/v1/images/generations',
     apiKey: '',
@@ -15,10 +15,21 @@ export const MediaConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
   });
 
   const [inputParams, setInputParams] = useState<{ name: string; type: string; value: string; referenceNode?: string }[]>([]);
+  const initializedNodeIdRef = useRef<string | null>(null);
+  const dirtyRef = useRef(false);
+
+  const setConfig = useCallback((nextConfig: typeof config) => {
+    dirtyRef.current = true;
+    setConfigState(nextConfig);
+  }, []);
 
   useEffect(() => {
+    if (initializedNodeIdRef.current === node.id && dirtyRef.current) {
+      return;
+    }
+
     if (node.data) {
-      setConfig({
+      setConfigState({
         provider: (node.data.provider as string) || 'openai',
         apiUrl: (node.data.apiUrl as string) || 'https://api.openai.com/v1/images/generations',
         apiKey: (node.data.apiKey as string) || '',
@@ -26,8 +37,10 @@ export const MediaConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
         resolution: (node.data.resolution as string) || '1024x1024',
         mediaType: (node.data.mediaType as string) || 'image'
       });
-      setInputParams((node.data.inputParams as any) || []);
+      setInputParams((node.data.inputParams as { name: string; type: string; value: string; referenceNode?: string }[]) || []);
     }
+    initializedNodeIdRef.current = node.id;
+    dirtyRef.current = false;
   }, [node]);
 
   const commitDraft = useCallback(() => {
@@ -38,22 +51,70 @@ export const MediaConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
     });
   }, [config, inputParams, node.data, node.id]);
 
-  useEffect(() => {
-    registerDraftSaver?.(commitDraft);
-  }, [commitDraft, registerDraftSaver]);
-
-  const handleSave = async () => {
+  const validateConfig = useCallback(() => {
     if (!config.apiKey) {
       message.warning('请输入 API Key');
+      return false;
+    }
+    if (!config.apiUrl) {
+      message.warning('请输入 API URL');
+      return false;
+    }
+    if (!config.model) {
+      message.warning('请输入模型名称');
+      return false;
+    }
+    for (const param of inputParams) {
+      if (!param.name) {
+        message.warning('请填写所有输入参数名');
+        return false;
+      }
+      if (param.type === 'reference' && !param.referenceNode) {
+        message.warning('请选择引用参数');
+        return false;
+      }
+      if (param.type !== 'reference' && !param.value) {
+        message.warning('请填写输入值');
+        return false;
+      }
+    }
+    return true;
+  }, [config, inputParams]);
+
+  const validateAndCommit = useCallback(() => {
+    if (!validateConfig()) {
+      return false;
+    }
+    commitDraft();
+    dirtyRef.current = false;
+    return true;
+  }, [commitDraft, validateConfig]);
+
+  const saveDraft = useCallback(() => {
+    commitDraft();
+    dirtyRef.current = false;
+    return true;
+  }, [commitDraft]);
+
+  useEffect(() => {
+    registerDraftSaver?.(saveDraft);
+  }, [registerDraftSaver, saveDraft]);
+
+  const handleSave = async () => {
+    if (!validateAndCommit()) {
       return;
     }
-
-    commitDraft();
     await onSave();
   };
 
-  const addInputParam = () => setInputParams([...inputParams, { name: 'prompt', type: 'reference', value: '' }]);
-  const removeInputParam = (index: number) => setInputParams(inputParams.filter((_, i) => i !== index));
+  const addInputParam = () => {
+    dirtyRef.current = true;
+    setInputParams([...inputParams, { name: 'prompt', type: 'reference', value: '' }]);
+  };
+  const removeInputParam = (index: number) => {
+    dirtyRef.current = true;
+    setInputParams(inputParams.filter((_, i) => i !== index));
+  };
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
@@ -116,11 +177,13 @@ export const MediaConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
                 <div key={index} className="flex flex-col gap-2 p-3 bg-gray-50 rounded border border-gray-200">
                   <div className="flex gap-2">
                     <Input placeholder="参数名 (如 prompt)" value={param.name} onChange={(e) => {
+                      dirtyRef.current = true;
                       const newParams = [...inputParams];
                       newParams[index].name = e.target.value;
                       setInputParams(newParams);
                     }} style={{ width: '100px' }} />
                     <Select value={param.type} onChange={(value) => {
+                      dirtyRef.current = true;
                       const newParams = [...inputParams];
                       newParams[index].type = value;
                       setInputParams(newParams);
@@ -131,12 +194,14 @@ export const MediaConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
                     
                     {param.type === 'input' ? (
                       <Input className="flex-1" placeholder="输入值" value={param.value} onChange={(e) => {
+                        dirtyRef.current = true;
                         const newParams = [...inputParams];
                         newParams[index].value = e.target.value;
                         setInputParams(newParams);
                       }} />
                     ) : (
                       <Select className="flex-1" placeholder="选择引用的节点参数" value={param.referenceNode} onChange={(value) => {
+                        dirtyRef.current = true;
                         const newParams = [...inputParams];
                         newParams[index].referenceNode = value;
                         setInputParams(newParams);

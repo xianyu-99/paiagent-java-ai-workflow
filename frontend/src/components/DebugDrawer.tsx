@@ -328,7 +328,17 @@ const DebugDrawer = ({ open, onClose }: DebugDrawerProps) => {
   const currentNodeResults = executionResult ? executionResult.nodeResults : Array.from(nodeStatusMap.values());
 
   return (
-    <Drawer title="调试面板" placement="right" onClose={onClose} open={open} width={450} styles={{ body: { padding: 0 } }}>
+    <Drawer
+      title="调试面板"
+      placement="right"
+      onClose={onClose}
+      open={open}
+      size="large"
+      styles={{
+        wrapper: { maxWidth: 'min(450px, 100vw)' },
+        body: { padding: 0 },
+      }}
+    >
       <div className="flex flex-col h-full">
         <div className="p-4 border-b border-gray-200">
           <Card title="输入测试文本" size="small">

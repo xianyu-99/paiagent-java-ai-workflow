@@ -32,6 +32,12 @@ class SafeUrlValidatorTest {
     }
 
     @Test
+    void shouldRejectLocalhostByDefault() {
+        assertThrows(IllegalArgumentException.class, () ->
+                SafeUrlValidator.requireSafeHttpUri("http://localhost:8080/admin", "test url", false));
+    }
+
+    @Test
     void shouldRejectPrivateNetworkHostByDefault() {
         assertThrows(IllegalArgumentException.class, () ->
                 SafeUrlValidator.requireSafeHttpUri("http://10.0.0.8/internal", "test url", false));
@@ -41,6 +47,12 @@ class SafeUrlValidatorTest {
     void shouldRejectMetadataServiceByDefault() {
         assertThrows(IllegalArgumentException.class, () ->
                 SafeUrlValidator.requireSafeHttpUri("http://169.254.169.254/latest/meta-data", "test url", false));
+    }
+
+    @Test
+    void shouldRejectMetadataServiceEvenWhenPrivateNetworkIsEnabled() {
+        assertThrows(IllegalArgumentException.class, () ->
+                SafeUrlValidator.requireSafeHttpUri("http://169.254.169.254/latest/meta-data", "test url", true));
     }
 
     @Test
