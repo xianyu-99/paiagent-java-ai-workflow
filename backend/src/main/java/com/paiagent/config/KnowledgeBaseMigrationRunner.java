@@ -4,6 +4,7 @@ import com.paiagent.service.TextEmbeddingService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -14,6 +15,7 @@ import java.util.List;
 
 @Slf4j
 @Component
+@Order(0)
 public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
@@ -25,6 +27,10 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
 
     private static final String DEFAULT_LLM_CONFIG_SCHEMA = """
             {"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"apiKey":{"type":"string"},"model":{"type":"string"},"skillName":{"type":"string","default":"service-desk-answer"},"prompt":{"type":"string","default":"你是企业服务台助手。请结合用户问题、RAG 上下文和引用来源回答，只输出 answer、citations、confidence、resolved、nextAction、ticketSummary、escalationReason 组成的 JSON。"},"temperature":{"type":"number","default":0.2},"maxTokens":{"type":"number","default":1200}}}
+            """;
+
+    private static final String DEFAULT_AGENT_CONFIG_SCHEMA = """
+            {"type":"object","properties":{"provider":{"type":"string"},"configId":{"type":"number"},"model":{"type":"string"},"systemPrompt":{"type":"string","default":"你是企业服务台 Agent，请结合工具、知识库和历史记忆完成任务。"},"taskTemplate":{"type":"string","default":"{{input}}"},"temperature":{"type":"number","default":0.2},"maxIterations":{"type":"number","default":5},"reasoningMode":{"type":"string","default":"react"},"tools":{"type":"array","items":{"type":"string"}},"knowledgeBaseId":{"type":"number"},"enableExecutionMemory":{"type":"boolean","default":false},"memoryTopK":{"type":"number","default":3},"memoryMinScore":{"type":"number","default":0.5},"collaborationMode":{"type":"string","default":"single","enum":["single","planner_worker_reviewer"]},"reviewerEnabled":{"type":"boolean","default":true},"skillName":{"type":"string","default":"service-desk-answer"}}}
             """;
 
     public KnowledgeBaseMigrationRunner(JdbcTemplate jdbcTemplate,
@@ -41,6 +47,10 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
         createKnowledgeChunkTable();
         migrateKnowledgeChunkEmbeddingMetadata();
         migrateKnowledgeChunkSourceMetadata();
+        createKnowledgeGraphEntityTable();
+        createKnowledgeGraphRelationTable();
+        createSkillEvolutionRecordTable();
+        createUserRetrievalProfileTable();
         createKnowledgeImportTaskTable();
         upsertCoreNodeDefinitions();
         hideLegacyProviderNodeDefinitions();
@@ -150,6 +160,95 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE knowledge_chunk ADD INDEX idx_chunk_doc_page (document_id, page_number, chunk_index)");
         addIndexIfMissing("knowledge_chunk", "idx_chunk_fulltext",
                 "ALTER TABLE knowledge_chunk ADD FULLTEXT INDEX idx_chunk_fulltext (content, source_name, section_title)");
+    }
+
+    private void createKnowledgeGraphEntityTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_graph_entity (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    knowledge_base_id BIGINT NOT NULL,
+                    document_id BIGINT NOT NULL,
+                    chunk_id BIGINT NOT NULL,
+                    name VARCHAR(255) NOT NULL,
+                    normalized_name VARCHAR(255) NOT NULL,
+                    entity_type VARCHAR(50) NOT NULL,
+                    aliases TEXT NULL,
+                    confidence DOUBLE DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    deleted TINYINT DEFAULT 0,
+                    INDEX idx_kg_entity_kb_name (knowledge_base_id, normalized_name),
+                    INDEX idx_kg_entity_doc (document_id),
+                    INDEX idx_kg_entity_chunk (chunk_id),
+                    INDEX idx_kg_entity_type (knowledge_base_id, entity_type)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG knowledge graph entity table'
+                """);
+    }
+
+    private void createKnowledgeGraphRelationTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS knowledge_graph_relation (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    knowledge_base_id BIGINT NOT NULL,
+                    document_id BIGINT NOT NULL,
+                    chunk_id BIGINT NOT NULL,
+                    source_name VARCHAR(255) NOT NULL,
+                    source_normalized_name VARCHAR(255) NOT NULL,
+                    source_type VARCHAR(50) NOT NULL,
+                    relation_type VARCHAR(80) NOT NULL,
+                    target_name VARCHAR(255) NOT NULL,
+                    target_normalized_name VARCHAR(255) NOT NULL,
+                    target_type VARCHAR(50) NOT NULL,
+                    evidence TEXT NULL,
+                    confidence DOUBLE DEFAULT 1.0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    deleted TINYINT DEFAULT 0,
+                    INDEX idx_kg_relation_kb_source (knowledge_base_id, source_normalized_name),
+                    INDEX idx_kg_relation_kb_target (knowledge_base_id, target_normalized_name),
+                    INDEX idx_kg_relation_type (knowledge_base_id, relation_type),
+                    INDEX idx_kg_relation_doc (document_id),
+                    INDEX idx_kg_relation_chunk (chunk_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG knowledge graph relation table'
+                """);
+    }
+
+    private void createSkillEvolutionRecordTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS skill_evolution_record (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    skill_name VARCHAR(120) NOT NULL,
+                    source_type VARCHAR(80) NOT NULL DEFAULT 'AGENT_EXECUTION',
+                    source_id BIGINT NULL,
+                    feedback_type VARCHAR(80) NOT NULL DEFAULT 'QUALITY_ISSUE',
+                    feedback_summary TEXT NULL,
+                    proposed_patch TEXT NULL,
+                    status VARCHAR(40) NOT NULL DEFAULT 'PENDING_REVIEW',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    deleted TINYINT DEFAULT 0,
+                    INDEX idx_skill_evolution_skill (skill_name, status),
+                    INDEX idx_skill_evolution_source (source_type, source_id),
+                    INDEX idx_skill_evolution_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent skill evolution candidate records'
+                """);
+    }
+
+    private void createUserRetrievalProfileTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS user_retrieval_profile (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    profile_json JSON NOT NULL,
+                    interaction_count INT DEFAULT 0,
+                    last_query TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    deleted TINYINT DEFAULT 0,
+                    UNIQUE KEY uk_user_retrieval_profile_user (user_id),
+                    INDEX idx_user_retrieval_profile_updated_at (updated_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='User retrieval personalization profile'
+                """);
     }
 
     private void createKnowledgeImportTaskTable() {
@@ -323,12 +422,15 @@ public class KnowledgeBaseMigrationRunner implements ApplicationRunner {
     }
 
     private void upsertNodeDefinition(String nodeType,
-                                      String displayName,
-                                      String category,
-                                      String icon,
-                                      String inputSchema,
-                                      String outputSchema,
-                                      String configSchema) {
+                                     String displayName,
+                                     String category,
+                                     String icon,
+                                     String inputSchema,
+                                     String outputSchema,
+                                     String configSchema) {
+        if ("agent".equals(nodeType)) {
+            configSchema = DEFAULT_AGENT_CONFIG_SCHEMA.strip();
+        }
         jdbcTemplate.update("""
                 INSERT INTO node_definition (node_type, display_name, category, icon, input_schema, output_schema, config_schema)
                 VALUES (?, ?, ?, ?, ?, ?, ?)

@@ -5,9 +5,8 @@ import com.paiagent.service.rag.RetrievalCandidate;
 import java.util.List;
 
 /**
- * Cross-Encoder Reranker: re-scores retrieval candidates by considering
- * the full query-document pair jointly, producing more accurate relevance
- * scores than the simple linear fusion of vector + keyword scores.
+ * Re-scores retrieval candidates after the first-stage hybrid recall.
+ * Implementations may be local score fusion or an external cross-encoder reranker.
  */
 public interface Reranker {
 

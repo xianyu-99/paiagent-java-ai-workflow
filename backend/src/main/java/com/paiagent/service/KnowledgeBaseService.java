@@ -24,12 +24,16 @@ import com.paiagent.mapper.KnowledgeImportTaskMapper;
 import com.paiagent.service.document.DocumentParsingService;
 import com.paiagent.service.document.ParsedDocument;
 import com.paiagent.service.document.ParsedSegment;
+import com.paiagent.service.graph.GraphEvidence;
+import com.paiagent.service.graph.KnowledgeGraphService;
 import com.paiagent.service.rag.RagRetrievalScorer;
+import com.paiagent.service.rag.RetrievalPersonalization;
 import com.paiagent.service.rag.RetrievalCandidate;
 import com.paiagent.service.vector.KnowledgeVectorStore;
 import com.paiagent.service.vector.VectorSearchHit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
@@ -39,9 +43,11 @@ import com.baomidou.mybatisplus.extension.toolkit.Db;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -101,6 +107,10 @@ public class KnowledgeBaseService {
 
     private final RerankerFactory rerankerFactory;
 
+    private final KnowledgeGraphService knowledgeGraphService;
+
+    private final UserRetrievalProfileService userRetrievalProfileService;
+
     @Autowired
     public KnowledgeBaseService(KnowledgeBaseMapper knowledgeBaseMapper,
                                 KnowledgeDocumentMapper knowledgeDocumentMapper,
@@ -111,9 +121,11 @@ public class KnowledgeBaseService {
                                 DocumentParsingService documentParsingService,
                                 RagRetrievalScorer ragRetrievalScorer,
                                 @Qualifier("ragImportTaskExecutor") ThreadPoolTaskExecutor ragImportTaskExecutor,
-                                org.springframework.beans.factory.ObjectProvider<HybridRetriever> hybridRetrieverProvider,
-                                org.springframework.beans.factory.ObjectProvider<BM25Scorer> bm25ScorerProvider,
-                                org.springframework.beans.factory.ObjectProvider<RerankerFactory> rerankerFactoryProvider) {
+                                ObjectProvider<HybridRetriever> hybridRetrieverProvider,
+                                ObjectProvider<BM25Scorer> bm25ScorerProvider,
+                                ObjectProvider<RerankerFactory> rerankerFactoryProvider,
+                                ObjectProvider<KnowledgeGraphService> knowledgeGraphServiceProvider,
+                                ObjectProvider<UserRetrievalProfileService> userRetrievalProfileServiceProvider) {
         this.knowledgeBaseMapper = knowledgeBaseMapper;
         this.knowledgeDocumentMapper = knowledgeDocumentMapper;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
@@ -126,6 +138,8 @@ public class KnowledgeBaseService {
         this.hybridRetriever = hybridRetrieverProvider.getIfAvailable();
         this.bm25Scorer = bm25ScorerProvider.getIfAvailable();
         this.rerankerFactory = rerankerFactoryProvider.getIfAvailable();
+        this.knowledgeGraphService = knowledgeGraphServiceProvider.getIfAvailable();
+        this.userRetrievalProfileService = userRetrievalProfileServiceProvider.getIfAvailable();
     }
 
     /**
@@ -155,6 +169,8 @@ public class KnowledgeBaseService {
         this.hybridRetriever = null;
         this.bm25Scorer = null;
         this.rerankerFactory = null;
+        this.knowledgeGraphService = null;
+        this.userRetrievalProfileService = null;
     }
 
     public List<KnowledgeBaseResponse> listKnowledgeBases(Long userId, boolean admin) {
@@ -423,6 +439,11 @@ public class KnowledgeBaseService {
                     .chunk(chunk)
                     .keywordScore(ragRetrievalScorer.keywordScore(query, chunk));
         }
+
+        if (candidates.isEmpty()) {
+            List<GraphEvidence> graphEvidence = findGraphEvidence(knowledgeBaseId, query, List.of(), candidateLimit);
+            loadGraphFallbackCandidates(knowledgeBaseId, graphEvidence, candidates);
+        }
         if (candidates.isEmpty()) {
             return List.of();
         }
@@ -451,6 +472,7 @@ public class KnowledgeBaseService {
         List<RetrievalCandidate> rankedCandidates = rankCandidates(
                 query, candidates, minScore, safeTopK);
 
+        attachGraphEvidence(knowledgeBaseId, query, rankedCandidates, candidateLimit);
         enrichRetrievedCandidates(rankedCandidates, query, safeContextWindow, safeContextMaxChars);
         return rankedCandidates.stream()
                 .map(this::toRetrievedChunk)
@@ -468,12 +490,110 @@ public class KnowledgeBaseService {
         }
     }
 
+    private List<GraphEvidence> findGraphEvidence(Long knowledgeBaseId,
+                                                  String query,
+                                                  Collection<Long> candidateChunkIds,
+                                                  int candidateLimit) {
+        if (knowledgeGraphService == null) {
+            return List.of();
+        }
+        try {
+            return knowledgeGraphService.findEvidence(
+                    knowledgeBaseId,
+                    query,
+                    candidateChunkIds,
+                    Math.max(6, Math.min(18, candidateLimit))
+            );
+        } catch (Exception e) {
+            log.warn("Knowledge graph evidence lookup failed: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private void loadGraphFallbackCandidates(Long knowledgeBaseId,
+                                             List<GraphEvidence> graphEvidence,
+                                             Map<Long, RetrievalCandidate> candidates) {
+        if (graphEvidence == null || graphEvidence.isEmpty()) {
+            return;
+        }
+        Set<Long> chunkIds = graphEvidence.stream()
+                .map(GraphEvidence::chunkId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (chunkIds.isEmpty()) {
+            return;
+        }
+        Map<Long, List<String>> evidenceByChunkId = graphEvidence.stream()
+                .filter(evidence -> evidence.chunkId() != null)
+                .collect(Collectors.groupingBy(
+                        GraphEvidence::chunkId,
+                        LinkedHashMap::new,
+                        Collectors.mapping(GraphEvidence::toContextLine, Collectors.toList())
+                ));
+        knowledgeChunkMapper.selectBatchIds(chunkIds).stream()
+                .filter(chunk -> knowledgeBaseId.equals(chunk.getKnowledgeBaseId()))
+                .filter(this::isCompatibleEmbedding)
+                .forEach(chunk -> candidates.computeIfAbsent(chunk.getId(), RetrievalCandidate::new)
+                        .chunk(chunk)
+                        .keywordScore(0.20d)
+                        .graphEvidence(evidenceByChunkId.getOrDefault(chunk.getId(), List.of())));
+    }
+
+    private void attachGraphEvidence(Long knowledgeBaseId,
+                                     String query,
+                                     List<RetrievalCandidate> rankedCandidates,
+                                     int candidateLimit) {
+        if (rankedCandidates == null || rankedCandidates.isEmpty()) {
+            return;
+        }
+        Set<Long> candidateChunkIds = rankedCandidates.stream()
+                .map(RetrievalCandidate::chunkId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<GraphEvidence> graphEvidence = findGraphEvidence(knowledgeBaseId, query, candidateChunkIds, candidateLimit);
+        if (graphEvidence.isEmpty()) {
+            return;
+        }
+
+        Map<Long, RetrievalCandidate> byChunkId = rankedCandidates.stream()
+                .collect(Collectors.toMap(
+                        RetrievalCandidate::chunkId,
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        List<String> unmatched = new ArrayList<>();
+        for (GraphEvidence evidence : graphEvidence) {
+            String line = evidence.toContextLine();
+            RetrievalCandidate candidate = byChunkId.get(evidence.chunkId());
+            if (candidate == null) {
+                unmatched.add(line);
+                continue;
+            }
+            List<String> merged = new ArrayList<>(candidate.graphEvidence());
+            if (!merged.contains(line)) {
+                merged.add(line);
+            }
+            candidate.graphEvidence(merged);
+        }
+        if (!unmatched.isEmpty()) {
+            RetrievalCandidate topCandidate = rankedCandidates.get(0);
+            List<String> merged = new ArrayList<>(topCandidate.graphEvidence());
+            for (String line : unmatched) {
+                if (!merged.contains(line)) {
+                    merged.add(line);
+                }
+            }
+            topCandidate.graphEvidence(merged);
+        }
+    }
+
     /**
-     * Rank retrieval candidates using the industrial pipeline when available:
+     * Rank retrieval candidates using the hybrid retrieval pipeline when available:
      * <ol>
      *   <li>Fuse dense (vector) and sparse (BM25) ranks via Reciprocal Rank Fusion (RRF).</li>
-     *   <li>Re-score the fused candidates with a Cross-Encoder Reranker (DashScope gte-rerank,
-     *       LLM-judge fallback), if a reranker is available.</li>
+     *   <li>Re-score the fused candidates with the configured reranker; high-confidence hits can
+     *       skip model rerank and use local score fusion directly.</li>
      *   <li>Apply minScore as a post-fusion / post-rerank threshold, then truncate to topK.</li>
      * </ol>
      * Falls back to the legacy linear fusion (0.65·vector + 0.35·keyword) when the RRF/rerank
@@ -507,7 +627,7 @@ public class KnowledgeBaseService {
     }
 
     /**
-     * Industrial ranking: RRF fusion → Cross-Encoder rerank → threshold → topK.
+     * Hybrid ranking: RRF fusion -> configured rerank -> threshold -> topK.
      */
     private List<RetrievalCandidate> rankWithRrfAndRerank(String query,
                                                           List<RetrievalCandidate> materialized,
@@ -549,7 +669,7 @@ public class KnowledgeBaseService {
             fusedCandidates.add(candidate);
         }
 
-        // 3. Cross-Encoder rerank (overwrites rerankScore with the reranker's relevance score).
+        // 3. Configured rerank (overwrites rerankScore with the reranker's relevance score).
         try {
             Reranker reranker = rerankerFactory.getReranker();
             if (!fusedCandidates.isEmpty()) {
@@ -615,8 +735,16 @@ public class KnowledgeBaseService {
                                                    double minScore,
                                                    Long userId,
                                                    boolean admin) {
-        getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
-        return retrieve(knowledgeBaseId, query, topK, minScore);
+        return retrieveAuthorized(
+                knowledgeBaseId,
+                query,
+                topK,
+                minScore,
+                DEFAULT_CONTEXT_WINDOW,
+                DEFAULT_CONTEXT_MAX_CHARS,
+                userId,
+                admin
+        );
     }
 
     public List<RetrievedChunk> retrieveAuthorized(Long knowledgeBaseId,
@@ -628,7 +756,80 @@ public class KnowledgeBaseService {
                                                    Long userId,
                                                    boolean admin) {
         getAuthorizedKnowledgeBase(knowledgeBaseId, userId, admin);
-        return retrieve(knowledgeBaseId, query, topK, minScore, contextWindow, contextMaxChars);
+        RetrievalPersonalization personalization = userRetrievalProfileService == null
+                ? new RetrievalPersonalization(userId, Map.of())
+                : userRetrievalProfileService.buildProfile(userId, query);
+        int safeTopK = Math.min(MAX_RETRIEVAL_TOP_K, Math.max(1, topK));
+        int personalizedTopK = personalization.active()
+                ? Math.min(MAX_RETRIEVAL_TOP_K, Math.max(safeTopK, safeTopK * 2))
+                : safeTopK;
+
+        List<RetrievedChunk> chunks = retrieve(
+                knowledgeBaseId,
+                query,
+                personalizedTopK,
+                minScore,
+                contextWindow,
+                contextMaxChars
+        );
+        List<RetrievedChunk> personalized = applyPersonalization(chunks, personalization, safeTopK);
+        if (userRetrievalProfileService != null) {
+            userRetrievalProfileService.recordInteraction(userId, query, personalized);
+        }
+        return personalized;
+    }
+
+    private List<RetrievedChunk> applyPersonalization(List<RetrievedChunk> chunks,
+                                                      RetrievalPersonalization personalization,
+                                                      int topK) {
+        if (chunks == null || chunks.isEmpty()) {
+            return List.of();
+        }
+        int safeTopK = Math.min(MAX_RETRIEVAL_TOP_K, Math.max(1, topK));
+        if (personalization == null || !personalization.active()) {
+            return chunks.stream().limit(safeTopK).toList();
+        }
+
+        for (RetrievedChunk chunk : chunks) {
+            RetrievalPersonalization.PersonalizationMatch match = personalization.match(personalizationText(chunk));
+            double boost = match.score();
+            chunk.setPersonalizationScore(boost);
+            chunk.setPersonalizationReasons(match.reasons());
+            if (boost > 0.0d) {
+                chunk.setScore(safeScore(chunk.getScore()) + boost);
+            }
+        }
+
+        List<RetrievedChunk> personalized = chunks.stream()
+                .sorted((left, right) -> Double.compare(safeScore(right.getScore()), safeScore(left.getScore())))
+                .limit(safeTopK)
+                .toList();
+        for (int i = 0; i < personalized.size(); i++) {
+            personalized.get(i).setRank(i + 1);
+        }
+        return personalized;
+    }
+
+    private String personalizationText(RetrievedChunk chunk) {
+        if (chunk == null) {
+            return "";
+        }
+        return String.join("\n",
+                nullToEmpty(chunk.getContent()),
+                nullToEmpty(chunk.getContextContent()),
+                nullToEmpty(chunk.getSourceName()),
+                nullToEmpty(chunk.getSectionTitle()),
+                chunk.getMatchedTerms() == null ? "" : String.join(" ", chunk.getMatchedTerms()),
+                chunk.getGraphEvidence() == null ? "" : String.join(" ", chunk.getGraphEvidence())
+        );
+    }
+
+    private double safeScore(Double score) {
+        return score == null || !Double.isFinite(score) ? 0.0d : score;
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
     }
 
     @Transactional
@@ -658,6 +859,7 @@ public class KnowledgeBaseService {
         }
         Db.updateBatchById(chunks);
         knowledgeVectorStore.upsert(chunks);
+        rebuildKnowledgeGraphForChunksBestEffort(knowledgeBaseId, chunks);
 
         return new KnowledgeReindexResponse(
                 knowledgeBaseId,
@@ -672,6 +874,9 @@ public class KnowledgeBaseService {
     public void deleteKnowledgeBase(Long id, Long userId, boolean admin) {
         getWritableKnowledgeBase(id, userId, admin);
         knowledgeVectorStore.deleteKnowledgeBase(id);
+        if (knowledgeGraphService != null) {
+            knowledgeGraphService.deleteKnowledgeBaseGraph(id);
+        }
         knowledgeChunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunk>().eq(KnowledgeChunk::getKnowledgeBaseId, id));
         knowledgeDocumentMapper.delete(new LambdaQueryWrapper<KnowledgeDocument>().eq(KnowledgeDocument::getKnowledgeBaseId, id));
         knowledgeImportTaskMapper.delete(new LambdaQueryWrapper<KnowledgeImportTask>().eq(KnowledgeImportTask::getKnowledgeBaseId, id));
@@ -782,6 +987,9 @@ public class KnowledgeBaseService {
         if (task == null || task.getDocumentId() == null) {
             return;
         }
+        if (knowledgeGraphService != null) {
+            knowledgeGraphService.deleteDocumentGraph(task.getDocumentId());
+        }
         knowledgeChunkMapper.delete(new LambdaQueryWrapper<KnowledgeChunk>()
                 .eq(KnowledgeChunk::getDocumentId, task.getDocumentId()));
         knowledgeDocumentMapper.deleteById(task.getDocumentId());
@@ -846,7 +1054,37 @@ public class KnowledgeBaseService {
         }
         progressReporter.update("导入完成", 100, chunks.size(), insertedChunks.size());
 
+        rebuildDocumentGraphBestEffort(knowledgeBaseId, document.getId(), insertedChunks);
         return toDocumentResponse(document);
+    }
+
+    private void rebuildDocumentGraphBestEffort(Long knowledgeBaseId,
+                                                Long documentId,
+                                                List<KnowledgeChunk> insertedChunks) {
+        if (knowledgeGraphService == null) {
+            return;
+        }
+        try {
+            knowledgeGraphService.rebuildDocumentGraph(knowledgeBaseId, documentId, insertedChunks);
+        } catch (Exception e) {
+            log.warn("Knowledge graph rebuild failed for document {}: {}", documentId, e.getMessage());
+        }
+    }
+
+    private void rebuildKnowledgeGraphForChunksBestEffort(Long knowledgeBaseId, List<KnowledgeChunk> chunks) {
+        if (knowledgeGraphService == null || chunks == null || chunks.isEmpty()) {
+            return;
+        }
+        Map<Long, List<KnowledgeChunk>> chunksByDocument = chunks.stream()
+                .filter(chunk -> chunk.getDocumentId() != null)
+                .collect(Collectors.groupingBy(
+                        KnowledgeChunk::getDocumentId,
+                        LinkedHashMap::new,
+                        Collectors.toList()
+                ));
+        for (Map.Entry<Long, List<KnowledgeChunk>> entry : chunksByDocument.entrySet()) {
+            rebuildDocumentGraphBestEffort(knowledgeBaseId, entry.getKey(), entry.getValue());
+        }
     }
 
     private KnowledgeBaseResponse toResponse(KnowledgeBase knowledgeBase) {
@@ -915,33 +1153,31 @@ public class KnowledgeBaseService {
     }
 
     private List<KnowledgeChunk> searchKeywordCandidates(Long knowledgeBaseId, String query, int limit) {
-        if (bm25Scorer == null) {
-            // BM25 not available (legacy test constructor); fall back to MySQL FULLTEXT.
-            List<String> terms = ragRetrievalScorer.searchTerms(query);
-            if (terms.isEmpty()) return List.of();
-            String joinedTerms = String.join(" ", terms);
-            LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<KnowledgeChunk>()
-                    .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
-                    .apply("MATCH(content, source_name, section_title) AGAINST({0} IN BOOLEAN MODE)", joinedTerms)
-                    .last("LIMIT " + Math.max(1, limit));
-            return knowledgeChunkMapper.selectList(wrapper);
+        List<String> terms = ragRetrievalScorer.searchTerms(query);
+        if (terms.isEmpty()) {
+            return List.of();
         }
 
-        // BM25-based keyword recall: pull compatible chunks, score them, return top N.
-        // Note: for large knowledge bases (10K+ chunks), consider an inverted-index pre-filter.
-        List<KnowledgeChunk> allChunks = knowledgeChunkMapper.selectList(
-                new LambdaQueryWrapper<KnowledgeChunk>()
-                        .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId));
-        if (allChunks.isEmpty()) return List.of();
+        List<KnowledgeChunk> prefiltered = searchKeywordPrefilterCandidates(knowledgeBaseId, terms, limit);
+        if (prefiltered.isEmpty() || bm25Scorer == null) {
+            return prefiltered.stream()
+                    .limit(Math.max(1, limit))
+                    .toList();
+        }
 
-        // Filter to compatible embeddings (same provider/dimensions as current config)
-        List<KnowledgeChunk> compatible = allChunks.stream()
+        List<KnowledgeChunk> compatible = prefiltered.stream()
                 .filter(this::isCompatibleEmbedding)
                 .toList();
-        if (compatible.isEmpty()) return List.of();
+        if (compatible.isEmpty()) {
+            return List.of();
+        }
 
         Map<Long, Double> scores = bm25Scorer.scoreBatch(query, compatible);
-        if (scores.isEmpty()) return List.of();
+        if (scores.isEmpty()) {
+            return compatible.stream()
+                    .limit(Math.max(1, limit))
+                    .toList();
+        }
 
         return compatible.stream()
                 .filter(chunk -> scores.containsKey(chunk.getId()))
@@ -950,6 +1186,40 @@ public class KnowledgeBaseService {
                         scores.getOrDefault(a.getId(), 0.0)))
                 .limit(Math.max(1, limit))
                 .toList();
+    }
+
+    private List<KnowledgeChunk> searchKeywordPrefilterCandidates(Long knowledgeBaseId, List<String> terms, int limit) {
+        String fulltextQuery = buildBooleanFulltextQuery(terms);
+        if (!StringUtils.hasText(fulltextQuery)) {
+            return List.of();
+        }
+        int prefilterLimit = Math.min(1000, Math.max(Math.max(1, limit) * 8, 200));
+        LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<KnowledgeChunk>()
+                .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
+                .eq(KnowledgeChunk::getEmbeddingProvider, textEmbeddingService.provider())
+                .eq(KnowledgeChunk::getEmbeddingModel, textEmbeddingService.model())
+                .eq(KnowledgeChunk::getEmbeddingDimension, textEmbeddingService.dimensions())
+                .apply("MATCH(content, source_name, section_title) AGAINST({0} IN BOOLEAN MODE)", fulltextQuery)
+                .last("LIMIT " + prefilterLimit);
+        try {
+            return knowledgeChunkMapper.selectList(wrapper);
+        } catch (Exception e) {
+            log.warn("FULLTEXT prefilter failed, falling back to bounded chunk scan: {}", e.getMessage());
+            return knowledgeChunkMapper.selectList(new LambdaQueryWrapper<KnowledgeChunk>()
+                    .eq(KnowledgeChunk::getKnowledgeBaseId, knowledgeBaseId)
+                    .eq(KnowledgeChunk::getEmbeddingProvider, textEmbeddingService.provider())
+                    .eq(KnowledgeChunk::getEmbeddingModel, textEmbeddingService.model())
+                    .eq(KnowledgeChunk::getEmbeddingDimension, textEmbeddingService.dimensions())
+                    .last("LIMIT " + prefilterLimit));
+        }
+    }
+
+    private String buildBooleanFulltextQuery(List<String> terms) {
+        return terms.stream()
+                .filter(StringUtils::hasText)
+                .map(term -> term.replaceAll("[+\\-~*()<>@\"']", " ").trim())
+                .filter(StringUtils::hasText)
+                .collect(Collectors.joining(" "));
     }
 
     private void enrichRetrievedCandidates(List<RetrievalCandidate> candidates,
@@ -1017,8 +1287,11 @@ public class KnowledgeBaseService {
                 candidate.keywordScore() == null ? 0.0 : candidate.keywordScore(),
                 candidate.rank(),
                 candidate.matchedTerms(),
+                candidate.graphEvidence(),
                 candidate.contextContent(),
-                candidate.contextChunkIndexes()
+                candidate.contextChunkIndexes(),
+                candidate.personalizationScore(),
+                candidate.personalizationReasons()
         );
     }
 

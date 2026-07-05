@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.paiagent.config.RagEmbeddingProperties;
 import com.paiagent.service.embedding.DashScopeEmbeddingProvider;
 import com.paiagent.service.embedding.EmbeddingProvider;
+import jakarta.annotation.PreDestroy;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -54,6 +55,13 @@ public class TextEmbeddingService {
                 sha256(normalizedText)
         );
         return queryEmbeddingCache.get(key, () -> embeddingProvider.embed(normalizedText));
+    }
+
+    @PreDestroy
+    public void close() throws Exception {
+        if (embeddingProvider instanceof AutoCloseable closeable) {
+            closeable.close();
+        }
     }
 
     public List<List<Double>> embedBatch(List<String> texts) {

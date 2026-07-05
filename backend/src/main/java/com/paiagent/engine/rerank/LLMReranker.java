@@ -46,7 +46,7 @@ public class LLMReranker implements Reranker {
     private final int maxRetries;
 
     public LLMReranker(RerankerProperties properties) {
-        this.enabled = properties.isLlufallbackEnabled();
+        this.enabled = properties.isLlmFallbackEnabled();
         this.timeoutMs = properties.getTimeoutMs() > 0 ? properties.getTimeoutMs() : 15_000;
         this.maxRetries = properties.getMaxRetries() >= 0 ? properties.getMaxRetries() : 1;
         this.apiKeyResolver = new EmbeddingApiKeyResolver();

@@ -84,10 +84,10 @@ class AgentNodeExecutorMemoryTest {
 
         String memoryContext = "=== Knowledge Context ===\n[Knowledge 1] (score: 0.95)\nAI stands for Artificial Intelligence.";
 
-        when(agentMemoryService.buildMemoryContext(
+        when(agentMemoryService.buildMemoryContextWithMetadata(
                 eq("What is AI?"), eq(42L), eq(100L),
                 eq(false), eq(3), eq(0.5)))
-                .thenReturn(memoryContext);
+                .thenReturn(memoryResult(memoryContext));
         when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
         when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(chatClient);
@@ -98,7 +98,7 @@ class AgentNodeExecutorMemoryTest {
         Map<String, Object> output = executor.execute(node, input);
 
         assertEquals("Answer", output.get("output"));
-        verify(agentMemoryService).buildMemoryContext(
+        verify(agentMemoryService).buildMemoryContextWithMetadata(
                 eq("What is AI?"), eq(42L), eq(100L), eq(false), eq(3), eq(0.5));
     }
 
@@ -116,10 +116,10 @@ class AgentNodeExecutorMemoryTest {
 
         String memoryContext = "=== Execution History ===\n[Past Execution 1] (similarity: 0.92)\nInput: hello\nOutput: hi";
 
-        when(agentMemoryService.buildMemoryContext(
+        when(agentMemoryService.buildMemoryContextWithMetadata(
                 eq("Summarize previous runs"), isNull(), eq(200L),
                 eq(true), eq(5), eq(0.7)))
-                .thenReturn(memoryContext);
+                .thenReturn(memoryResult(memoryContext));
         when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
         when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(chatClient);
@@ -130,7 +130,7 @@ class AgentNodeExecutorMemoryTest {
         Map<String, Object> output = executor.execute(node, input);
 
         assertEquals("Answer", output.get("output"));
-        verify(agentMemoryService).buildMemoryContext(
+        verify(agentMemoryService).buildMemoryContextWithMetadata(
                 eq("Summarize previous runs"), isNull(), eq(200L), eq(true), eq(5), eq(0.7));
     }
 
@@ -144,7 +144,7 @@ class AgentNodeExecutorMemoryTest {
         input.put("input", "Test");
         input.put("__executionFlowId__", 999L);
 
-        when(agentMemoryService.buildMemoryContext(
+        when(agentMemoryService.buildMemoryContextWithMetadata(
                 anyString(), any(), eq(999L), anyBoolean(), anyInt(), anyDouble()))
                 .thenReturn(null);
         when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
@@ -156,7 +156,7 @@ class AgentNodeExecutorMemoryTest {
 
         executor.execute(node, input);
 
-        verify(agentMemoryService).buildMemoryContext(
+        verify(agentMemoryService).buildMemoryContextWithMetadata(
                 eq("Test"), eq(1L), eq(999L), eq(false), eq(3), eq(0.5));
     }
 
@@ -194,7 +194,7 @@ class AgentNodeExecutorMemoryTest {
         input.put("input", "Risky task");
         input.put("__executionFlowId__", 400L);
 
-        when(agentMemoryService.buildMemoryContext(
+        when(agentMemoryService.buildMemoryContextWithMetadata(
                 anyString(), any(), any(), anyBoolean(), anyInt(), anyDouble()))
                 .thenThrow(new RuntimeException("Embedding service unavailable"));
         when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
@@ -207,7 +207,7 @@ class AgentNodeExecutorMemoryTest {
         Map<String, Object> output = executor.execute(node, input);
 
         assertEquals("Answer", output.get("output"));
-        verify(agentMemoryService).buildMemoryContext(
+        verify(agentMemoryService).buildMemoryContextWithMetadata(
                 eq("Risky task"), eq(7L), eq(400L), eq(true), eq(3), eq(0.5));
     }
 
@@ -223,10 +223,17 @@ class AgentNodeExecutorMemoryTest {
 
         String testMemoryContext = "Test memory context";
 
-        when(agentMemoryService.buildMemoryContext(
+        when(agentMemoryService.buildMemoryContextWithMetadata(
                 eq("What is AI?"), eq(99L), eq(500L),
                 eq(false), eq(3), eq(0.5)))
-                .thenReturn(testMemoryContext);
+                .thenReturn(new AgentMemoryService.MemoryContextResult(
+                        testMemoryContext,
+                        true,
+                        0.42d,
+                        100,
+                        42,
+                        3
+                ));
         when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
         when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(chatClient);
@@ -239,5 +246,18 @@ class AgentNodeExecutorMemoryTest {
         assertEquals("Answer", output.get("output"));
         assertTrue(output.containsKey("memoryContext"), "Output should contain memoryContext key");
         assertEquals(testMemoryContext, output.get("memoryContext"), "memoryContext should match the value from AgentMemoryService");
+        assertEquals(Boolean.TRUE, output.get("memoryCompressed"));
+        assertEquals(0.42d, (Double) output.get("memoryCompressionRatio"), 0.0001d);
+    }
+
+    private AgentMemoryService.MemoryContextResult memoryResult(String content) {
+        return new AgentMemoryService.MemoryContextResult(
+                content,
+                false,
+                1.0d,
+                content == null ? 0 : content.length(),
+                content == null ? 0 : content.length(),
+                0
+        );
     }
 }

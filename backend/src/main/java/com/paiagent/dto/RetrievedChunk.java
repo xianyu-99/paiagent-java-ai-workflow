@@ -35,7 +35,13 @@ public class RetrievedChunk {
 
     private List<String> matchedTerms;
 
+    private List<String> graphEvidence;
+
     private String contextContent;
 
     private List<Integer> contextChunkIndexes;
+
+    private Double personalizationScore;
+
+    private List<String> personalizationReasons;
 }

@@ -67,9 +67,6 @@ public class ReActPromptBuilder {
      */
     public static String buildUserPrompt(String task, String history, String memoryContext) {
         StringBuilder sb = new StringBuilder();
-        if (memoryContext != null && !memoryContext.isBlank()) {
-            sb.append("Relevant context from memory:\n").append(memoryContext).append("\n\n");
-        }
         sb.append("Task: ").append(task).append("\n\n");
         if (history != null && !history.isBlank()) {
             sb.append("Previous steps:\n").append(history).append("\n\n");

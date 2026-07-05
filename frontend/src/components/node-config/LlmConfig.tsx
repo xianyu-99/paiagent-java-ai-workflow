@@ -17,6 +17,7 @@ import SkillSelector from '../SkillSelector';
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   deepseek: 'deepseek-chat',
+  local_qwen: 'qwen2.5:7b',
   qwen: 'qwen-plus',
   moonshot: 'kimi-k2.6',
   kimi_code: 'kimi-for-coding',

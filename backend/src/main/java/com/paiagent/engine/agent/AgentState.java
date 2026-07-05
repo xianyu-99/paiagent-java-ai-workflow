@@ -35,6 +35,8 @@ public class AgentState {
     private final long createdAt;           // 状态创建时间
     private final int maxIterations;        // 最大允许迭代次数
     private String memoryContext;           // 记忆上下文（从知识库或执行记忆中检索）
+    private boolean memoryCompressed;       // 记忆上下文是否经过压缩
+    private Double memoryCompressionRatio;  // 压缩后长度 / 原始长度
 
     private String systemPrompt;
 
@@ -46,6 +48,8 @@ public class AgentState {
         this.currentIteration = 0;
         this.finished = false;
         this.createdAt = System.currentTimeMillis();
+        this.memoryCompressed = false;
+        this.memoryCompressionRatio = 1.0d;
     }
 
     /**

@@ -17,8 +17,11 @@ public class RetrievalCandidate {
     private Double rerankScore = 0.0;
     private Integer rank = 0;
     private List<String> matchedTerms = List.of();
+    private List<String> graphEvidence = List.of();
     private String contextContent = "";
     private List<Integer> contextChunkIndexes = List.of();
+    private Double personalizationScore = 0.0d;
+    private List<String> personalizationReasons = List.of();
 
     public RetrievalCandidate(Long chunkId) {
         this.chunkId = chunkId;
@@ -82,6 +85,15 @@ public class RetrievalCandidate {
         return this;
     }
 
+    public List<String> graphEvidence() {
+        return graphEvidence;
+    }
+
+    public RetrievalCandidate graphEvidence(List<String> graphEvidence) {
+        this.graphEvidence = graphEvidence == null ? List.of() : graphEvidence;
+        return this;
+    }
+
     public String contextContent() {
         return contextContent;
     }
@@ -97,6 +109,24 @@ public class RetrievalCandidate {
 
     public RetrievalCandidate contextChunkIndexes(List<Integer> contextChunkIndexes) {
         this.contextChunkIndexes = contextChunkIndexes == null ? List.of() : contextChunkIndexes;
+        return this;
+    }
+
+    public Double personalizationScore() {
+        return personalizationScore;
+    }
+
+    public RetrievalCandidate personalizationScore(Double personalizationScore) {
+        this.personalizationScore = personalizationScore == null ? 0.0d : personalizationScore;
+        return this;
+    }
+
+    public List<String> personalizationReasons() {
+        return personalizationReasons;
+    }
+
+    public RetrievalCandidate personalizationReasons(List<String> personalizationReasons) {
+        this.personalizationReasons = personalizationReasons == null ? List.of() : personalizationReasons;
         return this;
     }
 }

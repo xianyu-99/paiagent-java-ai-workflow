@@ -11,6 +11,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RagNodeExecutorTest {
@@ -65,6 +66,15 @@ class RagNodeExecutorTest {
         String question = ReflectionTestUtils.invokeMethod(executor, "resolveQuestion", data, Map.of("input", "raw question"));
 
         assertEquals("raw question", question);
+    }
+
+    @Test
+    void shouldResolveQuestionSafelyWhenInputIsNull() {
+        RagNodeExecutor executor = new RagNodeExecutor(null);
+
+        String question = ReflectionTestUtils.invokeMethod(executor, "resolveQuestion", Map.of(), null);
+
+        assertNull(question);
     }
 
     @Test

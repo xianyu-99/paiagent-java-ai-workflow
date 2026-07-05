@@ -142,6 +142,19 @@ CREATE TABLE IF NOT EXISTS execution_record (
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='执行记录表';
 
+CREATE TABLE IF NOT EXISTS user_retrieval_profile (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '用户检索画像主键 ID',
+    user_id BIGINT NOT NULL COMMENT '用户 ID',
+    profile_json JSON NOT NULL COMMENT '偏好词与权重 JSON',
+    interaction_count INT DEFAULT 0 COMMENT '累计交互次数',
+    last_query TEXT NULL COMMENT '最近一次问题',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    deleted TINYINT DEFAULT 0 COMMENT '逻辑删除标识',
+    UNIQUE KEY uk_user_retrieval_profile_user (user_id),
+    INDEX idx_user_retrieval_profile_updated_at (updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户检索个性化画像表';
+
 -- RAG 知识库表
 CREATE TABLE IF NOT EXISTS knowledge_base (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '知识库主键 ID',
@@ -202,6 +215,68 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG 知识库切片表';
 
 -- RAG 知识导入任务表
+-- Lightweight GraphRAG entity table
+CREATE TABLE IF NOT EXISTS knowledge_graph_entity (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    document_id BIGINT NOT NULL,
+    chunk_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    entity_type VARCHAR(50) NOT NULL,
+    aliases TEXT NULL,
+    confidence DOUBLE DEFAULT 1.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_kg_entity_kb_name (knowledge_base_id, normalized_name),
+    INDEX idx_kg_entity_doc (document_id),
+    INDEX idx_kg_entity_chunk (chunk_id),
+    INDEX idx_kg_entity_type (knowledge_base_id, entity_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG knowledge graph entity table';
+
+-- Lightweight GraphRAG relation table
+CREATE TABLE IF NOT EXISTS knowledge_graph_relation (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    knowledge_base_id BIGINT NOT NULL,
+    document_id BIGINT NOT NULL,
+    chunk_id BIGINT NOT NULL,
+    source_name VARCHAR(255) NOT NULL,
+    source_normalized_name VARCHAR(255) NOT NULL,
+    source_type VARCHAR(50) NOT NULL,
+    relation_type VARCHAR(80) NOT NULL,
+    target_name VARCHAR(255) NOT NULL,
+    target_normalized_name VARCHAR(255) NOT NULL,
+    target_type VARCHAR(50) NOT NULL,
+    evidence TEXT NULL,
+    confidence DOUBLE DEFAULT 1.0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_kg_relation_kb_source (knowledge_base_id, source_normalized_name),
+    INDEX idx_kg_relation_kb_target (knowledge_base_id, target_normalized_name),
+    INDEX idx_kg_relation_type (knowledge_base_id, relation_type),
+    INDEX idx_kg_relation_doc (document_id),
+    INDEX idx_kg_relation_chunk (chunk_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='RAG knowledge graph relation table';
+
+CREATE TABLE IF NOT EXISTS skill_evolution_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    skill_name VARCHAR(120) NOT NULL,
+    source_type VARCHAR(80) NOT NULL DEFAULT 'AGENT_EXECUTION',
+    source_id BIGINT NULL,
+    feedback_type VARCHAR(80) NOT NULL DEFAULT 'QUALITY_ISSUE',
+    feedback_summary TEXT NULL,
+    proposed_patch TEXT NULL,
+    status VARCHAR(40) NOT NULL DEFAULT 'PENDING_REVIEW',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted TINYINT DEFAULT 0,
+    INDEX idx_skill_evolution_skill (skill_name, status),
+    INDEX idx_skill_evolution_source (source_type, source_id),
+    INDEX idx_skill_evolution_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Agent skill evolution candidate records';
+
 CREATE TABLE IF NOT EXISTS knowledge_import_task (
     id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '导入任务主键 ID',
     knowledge_base_id BIGINT NOT NULL COMMENT '知识库 ID',

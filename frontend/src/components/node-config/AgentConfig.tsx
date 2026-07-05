@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Form, Input, Select, Button, message } from 'antd';
+import { Form, Input, Select, Button, message, Checkbox } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { NodeConfigProps, LlmInputParam, LlmOutputParam } from './types';
 import { useWorkflowStore } from '../../store/workflowStore';
@@ -12,10 +12,12 @@ import {
   getProviderModelPlaceholder,
 } from '../../utils/provider';
 import SkillSelector from '../SkillSelector';
+import { KnowledgeBase, listKnowledgeBases } from '../../api/knowledge';
 
 const DEFAULT_PROVIDER_MODELS: Record<string, string> = {
   openai: 'gpt-4o-mini',
   deepseek: 'deepseek-chat',
+  local_qwen: 'qwen2.5:7b',
   qwen: 'qwen-plus',
   moonshot: 'kimi-k2.6',
   kimi_code: 'kimi-for-coding',
@@ -40,10 +42,17 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
     skillName: '',
     tools: [] as string[],
     maxIterations: 5,
-    reasoningMode: 'react'
+    reasoningMode: 'react',
+    knowledgeBaseId: undefined as number | undefined,
+    enableExecutionMemory: false,
+    memoryTopK: 3,
+    memoryMinScore: 0.5,
+    collaborationMode: 'single',
+    reviewerEnabled: true
   });
   const [llmInputParams, setLlmInputParams] = useState<LlmInputParam[]>([]);
   const [llmOutputParams, setLlmOutputParams] = useState<LlmOutputParam[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const initializedNodeIdRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
 
@@ -52,9 +61,20 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
     setLlmConfig(nextConfig);
   }, []);
 
+  const refreshKnowledgeBases = useCallback(async () => {
+    try {
+      const res = await listKnowledgeBases();
+      if (res.code === 200) setKnowledgeBases(res.data || []);
+    } catch (error) {
+      setKnowledgeBases([]);
+      console.warn('Failed to load knowledge bases for Agent config:', error);
+    }
+  }, []);
+
   useEffect(() => {
     fetchLLMGlobalConfigs();
-  }, [fetchLLMGlobalConfigs]);
+    refreshKnowledgeBases();
+  }, [fetchLLMGlobalConfigs, refreshKnowledgeBases]);
 
   useEffect(() => {
     if (initializedNodeIdRef.current === node.id && dirtyRef.current) {
@@ -82,7 +102,17 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
       skillName: (node.data?.skillName as string) || '',
       tools: Array.isArray(node.data?.tools) ? node.data.tools : [],
       maxIterations: (node.data?.maxIterations as number) || 5,
-      reasoningMode: (node.data?.reasoningMode as string) || 'react'
+      reasoningMode: 'react',
+      knowledgeBaseId: (node.data?.knowledgeBaseId as number) || undefined,
+      enableExecutionMemory: Boolean(node.data?.enableExecutionMemory),
+      memoryTopK: (node.data?.memoryTopK as number) || 3,
+      memoryMinScore: (node.data?.memoryMinScore as number | undefined) ?? 0.5,
+      collaborationMode: node.data?.collaborationMode === 'planner_worker_reviewer'
+        ? 'planner_worker_reviewer'
+        : 'single',
+      reviewerEnabled: node.data?.reviewerEnabled === undefined
+        ? true
+        : Boolean(node.data?.reviewerEnabled)
     });
     setLlmInputParams((node.data?.inputParams as LlmInputParam[]) || []);
     setLlmOutputParams((node.data?.outputParams as LlmOutputParam[]) || []);
@@ -147,7 +177,13 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
       skillName: llmConfig.skillName,
       tools: llmConfig.tools,
       maxIterations: llmConfig.maxIterations,
-      reasoningMode: llmConfig.reasoningMode,
+      reasoningMode: 'react',
+      knowledgeBaseId: llmConfig.knowledgeBaseId,
+      enableExecutionMemory: llmConfig.enableExecutionMemory,
+      memoryTopK: llmConfig.memoryTopK,
+      memoryMinScore: llmConfig.memoryMinScore,
+      collaborationMode: llmConfig.collaborationMode,
+      reviewerEnabled: llmConfig.reviewerEnabled,
       inputParams: llmInputParams,
       outputParams: llmOutputParams
     };
@@ -216,6 +252,59 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
             options={AVAILABLE_TOOLS}
           />
         </Form.Item>
+
+        <Form.Item label="知识库记忆">
+          <Select
+            allowClear
+            placeholder="选择知识库"
+            value={llmConfig.knowledgeBaseId}
+            onChange={(value: number | undefined) => updateLlmConfig({ ...llmConfig, knowledgeBaseId: value })}
+          >
+            {knowledgeBases.map(kb => (
+              <Select.Option key={kb.id} value={kb.id}>
+                {kb.name}（文档 {kb.documentCount || 0} / 切片 {kb.chunkCount || 0}）
+              </Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+
+        <Form.Item>
+          <Checkbox
+            checked={llmConfig.enableExecutionMemory}
+            onChange={(e) => updateLlmConfig({ ...llmConfig, enableExecutionMemory: e.target.checked })}
+          >
+            启用执行记忆
+          </Checkbox>
+        </Form.Item>
+
+        <div className="grid grid-cols-2 gap-4">
+          <Form.Item label="记忆 Top-K">
+            <Input
+              type="number"
+              min={1}
+              max={10}
+              value={llmConfig.memoryTopK}
+              onChange={(e) => {
+                const nextTopK = parseInt(e.target.value, 10);
+                updateLlmConfig({ ...llmConfig, memoryTopK: Number.isNaN(nextTopK) ? 3 : nextTopK });
+              }}
+            />
+          </Form.Item>
+
+          <Form.Item label="最低相似度得分">
+            <Input
+              type="number"
+              step="0.05"
+              min={0}
+              max={1}
+              value={llmConfig.memoryMinScore}
+              onChange={(e) => {
+                const nextMinScore = parseFloat(e.target.value);
+                updateLlmConfig({ ...llmConfig, memoryMinScore: Number.isNaN(nextMinScore) ? 0.5 : nextMinScore });
+              }}
+            />
+          </Form.Item>
+        </div>
         
         <div className="grid grid-cols-2 gap-4">
           <Form.Item label="推理模式">
@@ -224,7 +313,6 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
               onChange={(val) => updateLlmConfig({...llmConfig, reasoningMode: val})}
             >
               <Select.Option value="react">ReAct (默认)</Select.Option>
-              <Select.Option value="plan_and_execute">Plan & Execute</Select.Option>
             </Select>
           </Form.Item>
 
@@ -237,6 +325,29 @@ export const AgentConfig: React.FC<NodeConfigProps> = ({ node, onSave, getRefere
               onChange={(e) => updateLlmConfig({...llmConfig, maxIterations: parseInt(e.target.value) || 5})}
             />
           </Form.Item>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <Form.Item label="协作模式">
+            <Select
+              value={llmConfig.collaborationMode}
+              onChange={(value: string) => updateLlmConfig({ ...llmConfig, collaborationMode: value })}
+            >
+              <Select.Option value="single">单 Agent</Select.Option>
+              <Select.Option value="planner_worker_reviewer">Planner / Worker / Reviewer</Select.Option>
+            </Select>
+          </Form.Item>
+
+          {llmConfig.collaborationMode === 'planner_worker_reviewer' && (
+            <Form.Item label="Reviewer 复核">
+              <Checkbox
+                checked={llmConfig.reviewerEnabled}
+                onChange={(e) => updateLlmConfig({ ...llmConfig, reviewerEnabled: e.target.checked })}
+              >
+                启用
+              </Checkbox>
+            </Form.Item>
+          )}
         </div>
       </div>
 

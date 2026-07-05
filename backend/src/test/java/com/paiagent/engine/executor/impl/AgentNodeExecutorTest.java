@@ -10,6 +10,7 @@ import com.paiagent.engine.llm.ChatClientFactory;
 import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.entity.LLMGlobalConfig;
 import com.paiagent.service.LLMGlobalConfigService;
+import com.paiagent.service.SkillEvolutionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -40,6 +41,9 @@ class AgentNodeExecutorTest {
 
     @Mock
     LLMGlobalConfigService llmGlobalConfigService;
+
+    @Mock
+    SkillEvolutionService skillEvolutionService;
 
     @Mock
     ChatClient chatClient;
@@ -282,5 +286,178 @@ class AgentNodeExecutorTest {
                 () -> executor.execute(agentNode(data), Map.of("input", "2+2")));
 
         assertTrue(exception.getMessage().contains("unknown tools"));
+    }
+
+    @Test
+    void shouldRunPlannerWorkerReviewerCollaborationMode() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("collaborationMode", "planner_worker_reviewer");
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(
+                        ReasoningResult.finalAnswer("plan thought", "1. retrieve\n2. answer"),
+                        ReasoningResult.finalAnswer("worker thought", "draft answer"),
+                        ReasoningResult.finalAnswer("review thought", "reviewed answer")
+                );
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals("reviewed answer", output.get("output"));
+        assertEquals("planner_worker_reviewer", output.get("collaborationMode"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trace = (List<Map<String, Object>>) output.get("agentTrace");
+        assertNotNull(trace);
+        assertEquals(3, trace.size());
+        assertEquals("planner", trace.get(0).get("stage"));
+        assertEquals("worker", trace.get(1).get("stage"));
+        assertEquals("reviewer", trace.get(2).get("stage"));
+        verify(reasoningEngine, times(3)).reason(any(AgentState.class), anyList(), eq(chatClient));
+    }
+
+    @Test
+    void shouldPreserveWorkerAnswerWhenReviewerFails() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("collaborationMode", "planner_worker_reviewer");
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(
+                        ReasoningResult.finalAnswer("plan thought", "1. retrieve\n2. answer"),
+                        ReasoningResult.finalAnswer("worker thought", "worker answer"),
+                        ReasoningResult.error("Reviewer parse failed")
+                );
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals("worker answer", output.get("output"));
+        assertNull(output.get("error"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trace = (List<Map<String, Object>>) output.get("agentTrace");
+        assertNotNull(trace);
+        assertEquals(3, trace.size());
+        assertEquals("Reviewer parse failed", trace.get(2).get("error"));
+        verify(reasoningEngine, times(3)).reason(any(AgentState.class), anyList(), eq(chatClient));
+    }
+
+    @Test
+    void shouldSkipReviewerWhenReviewerDisabled() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("collaborationMode", "planner_worker_reviewer");
+        data.put("reviewerEnabled", false);
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(
+                        ReasoningResult.finalAnswer("plan thought", "1. retrieve\n2. answer"),
+                        ReasoningResult.finalAnswer("worker thought", "worker answer")
+                );
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals("worker answer", output.get("output"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> trace = (List<Map<String, Object>>) output.get("agentTrace");
+        assertNotNull(trace);
+        assertEquals(2, trace.size());
+        assertEquals("planner", trace.get(0).get("stage"));
+        assertEquals("worker", trace.get(1).get("stage"));
+        verify(reasoningEngine, times(2)).reason(any(AgentState.class), anyList(), eq(chatClient));
+    }
+
+    @Test
+    void shouldRecordSkillEvolutionCandidateWhenAgentFailsAndSkillConfigured() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("skillName", "service-desk-answer");
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(ReasoningResult.error("Failed to parse LLM response"));
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals(Boolean.TRUE, output.get("skillEvolutionCandidateRecorded"));
+        verify(skillEvolutionService).recordCandidate(
+                eq("service-desk-answer"),
+                eq("AGENT_EXECUTION"),
+                isNull(),
+                eq("AGENT_FAILURE"),
+                contains("Failed to parse"),
+                contains("VPN issue")
+        );
+    }
+
+    @Test
+    void shouldRecordSkillEvolutionCandidateWhenStructuredAnswerHasLowConfidence() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("skillName", "service-desk-answer");
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(ReasoningResult.finalAnswer(
+                        "Done",
+                        "{\"answer\":\"Restart the VPN profile.\",\"citations\":[{\"source\":\"vpn.md\"}],\"confidence\":0.31}"
+                ));
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals(Boolean.TRUE, output.get("skillEvolutionCandidateRecorded"));
+        verify(skillEvolutionService).recordCandidate(
+                eq("service-desk-answer"),
+                eq("AGENT_EXECUTION"),
+                isNull(),
+                eq("LOW_CONFIDENCE"),
+                contains("confidence=0.31"),
+                contains("VPN issue")
+        );
+    }
+
+    @Test
+    void shouldRecordSkillEvolutionCandidateWhenStructuredAnswerHasNoCitations() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("skillName", "service-desk-answer");
+        WorkflowNode node = agentNode(data);
+
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(ReasoningResult.finalAnswer(
+                        "Done",
+                        "{\"answer\":\"Restart the VPN profile.\",\"citations\":[],\"confidence\":0.86}"
+                ));
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals(Boolean.TRUE, output.get("skillEvolutionCandidateRecorded"));
+        verify(skillEvolutionService).recordCandidate(
+                eq("service-desk-answer"),
+                eq("AGENT_EXECUTION"),
+                isNull(),
+                eq("MISSING_CITATION"),
+                contains("without citations"),
+                contains("VPN issue")
+        );
     }
 }

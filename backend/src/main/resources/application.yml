@@ -84,6 +84,8 @@ paiagent:
   security:
     # API Key 入库前使用 AES/GCM 加密；生产环境必须显式配置稳定密钥
     api-key-secret: ${API_KEY_ENCRYPTION_SECRET:}
+    # 本地 Qwen/Ollama/vLLM 等私网 OpenAI-compatible 地址需要显式开启
+    allow-private-network-urls: ${PAIAGENT_ALLOW_PRIVATE_NETWORK_URLS:false}
   auth:
     # 本地开发未配置 JWT_SECRET 时会自动生成临时强密钥；生产环境请务必显式配置
     jwt-secret: ${JWT_SECRET:}
@@ -115,11 +117,24 @@ paiagent:
         b: ${RAG_BM25_B:0.75}
     rerank:
       enabled: ${RAG_RERANK_ENABLED:true}
-      model: ${RAG_RERANK_MODEL:gte-rerank}
+      external-enabled: ${RAG_RERANK_EXTERNAL_ENABLED:true}
+      local-enabled: ${RAG_RERANK_LOCAL_ENABLED:false}
+      local-base-url: ${RAG_RERANK_LOCAL_BASE_URL:http://localhost:8001/rerank}
+      model: ${RAG_RERANK_MODEL:gte-rerank-v2}
       base-url: ${RAG_RERANK_BASE_URL:https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}
-      timeout-ms: ${RAG_RERANK_TIMEOUT_MS:10000}
-      max-retries: ${RAG_RERANK_MAX_RETRIES:2}
-      llm-fallback-enabled: ${RAG_RERANK_LLM_FALLBACK_ENABLED:true}
+      timeout-ms: ${RAG_RERANK_TIMEOUT_MS:2000}
+      max-retries: ${RAG_RERANK_MAX_RETRIES:1}
+      llm-fallback-enabled: ${RAG_RERANK_LLM_FALLBACK_ENABLED:false}
+      candidate-limit: ${RAG_RERANK_CANDIDATE_LIMIT:12}
+      high-confidence-skip-enabled: ${RAG_RERANK_HIGH_CONFIDENCE_SKIP_ENABLED:true}
+      high-confidence-min-vector-score: ${RAG_RERANK_HIGH_CONFIDENCE_MIN_VECTOR_SCORE:0.72}
+      high-confidence-min-keyword-score: ${RAG_RERANK_HIGH_CONFIDENCE_MIN_KEYWORD_SCORE:0.08}
+      high-confidence-min-rrf-margin: ${RAG_RERANK_HIGH_CONFIDENCE_MIN_RRF_MARGIN:0.0}
+      cache-enabled: ${RAG_RERANK_CACHE_ENABLED:true}
+      cache-ttl-seconds: ${RAG_RERANK_CACHE_TTL_SECONDS:300}
+      cache-max-size: ${RAG_RERANK_CACHE_MAX_SIZE:2048}
+    graph:
+      backfill-enabled: ${RAG_GRAPH_BACKFILL_ENABLED:true}
     embedding:
       provider: ${RAG_EMBEDDING_PROVIDER:dashscope}
       base-url: ${RAG_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
@@ -128,6 +143,8 @@ paiagent:
       dimensions: ${RAG_EMBEDDING_DIMENSIONS:1024}
       timeout-ms: ${RAG_EMBEDDING_TIMEOUT_MS:30000}
       batch-size: ${RAG_EMBEDDING_BATCH_SIZE:16}
+      request-batching-enabled: ${RAG_EMBEDDING_REQUEST_BATCHING_ENABLED:true}
+      request-batch-window-ms: ${RAG_EMBEDDING_REQUEST_BATCH_WINDOW_MS:20}
       cache-enabled: ${RAG_EMBEDDING_CACHE_ENABLED:true}
       cache-ttl-seconds: ${RAG_EMBEDDING_CACHE_TTL_SECONDS:3600}
       cache-max-size: ${RAG_EMBEDDING_CACHE_MAX_SIZE:2048}

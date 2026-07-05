@@ -2,14 +2,13 @@ package com.paiagent.engine.rerank;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.paiagent.service.embedding.EmbeddingApiKeyResolver;
 import com.paiagent.service.rag.RetrievalCandidate;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
@@ -23,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * DashScope (Alibaba Bailian) Reranker using the gte-rerank model.
+ * DashScope (Alibaba Bailian) Reranker using a dedicated text rerank model.
  * <p>
  * Calls the DashScope Rerank API to re-score retrieval candidates as
  * query-document pairs via a Cross-Encoder, producing substantially
@@ -35,8 +34,6 @@ import java.util.Map;
 public class DashScopeReranker implements Reranker {
 
     private static final Logger log = LoggerFactory.getLogger(DashScopeReranker.class);
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private final RestClient restClient;
 
@@ -57,13 +54,17 @@ public class DashScopeReranker implements Reranker {
 
     public DashScopeReranker(RerankerProperties properties) {
         this.enabled = properties.isEnabled();
-        this.model = properties.getModel() != null ? properties.getModel() : "gte-rerank";
+        this.model = properties.getModel() != null ? properties.getModel() : "gte-rerank-v2";
         this.baseUrl = properties.getBaseUrl() != null ? properties.getBaseUrl()
                 : "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank";
         this.timeoutMs = properties.getTimeoutMs() > 0 ? properties.getTimeoutMs() : 10_000;
         this.maxRetries = properties.getMaxRetries() >= 0 ? properties.getMaxRetries() : 2;
         this.apiKeyResolver = new EmbeddingApiKeyResolver();
+        SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
+        requestFactory.setConnectTimeout(this.timeoutMs);
+        requestFactory.setReadTimeout(this.timeoutMs);
         this.restClient = RestClient.builder()
+                .requestFactory(requestFactory)
                 .baseUrl(this.baseUrl)
                 .build();
     }
@@ -106,8 +107,9 @@ public class DashScopeReranker implements Reranker {
             String content = c.chunk() != null && c.chunk().getContent() != null
                     ? c.chunk().getContent() : c.contextContent();
             if (StringUtils.hasText(content)) {
+                int documentIndex = documents.size();
                 documents.add(content);
-                indexToCandidate.put(i, c);
+                indexToCandidate.put(documentIndex, c);
             }
         }
 
@@ -115,13 +117,9 @@ public class DashScopeReranker implements Reranker {
             return candidates;
         }
 
-        double[] scores = new double[candidates.size()];
         for (int retry = 0; retry <= maxRetries; retry++) {
             try {
-                Map<String, Object> body = new LinkedHashMap<>();
-                body.put("model", model);
-                body.put("input", Map.of("query", query, "documents", documents));
-                body.put("parameters", Map.of("top_n", Math.min(documents.size(), 50)));
+                Map<String, Object> body = buildRequestBody(query, documents);
 
                 DashScopeRerankResponse response = restClient.post()
                         .uri("")
@@ -131,17 +129,21 @@ public class DashScopeReranker implements Reranker {
                         .retrieve()
                         .body(DashScopeRerankResponse.class);
 
-                if (response != null && response.getOutput() != null
-                        && response.getOutput().getResults() != null) {
-                    for (DashScopeRerankResult result : response.getOutput().getResults()) {
+                List<DashScopeRerankResult> results = response == null ? List.of() : response.results();
+                if (!results.isEmpty()) {
+                    for (DashScopeRerankResult result : results) {
                         int idx = result.getIndex();
-                        if (idx >= 0 && idx < scores.length && result.getRelevanceScore() != null) {
-                            scores[idx] = result.getRelevanceScore();
+                        RetrievalCandidate candidate = indexToCandidate.get(idx);
+                        if (candidate != null && result.getRelevanceScore() != null) {
+                            candidate.rerankScore(result.getRelevanceScore());
                         }
                     }
                 }
-                log.debug("DashScopeReranker: reranked {} documents in {}ms",
-                        documents.size(), response != null ? response.getUsage().getTotalTokens() : 0);
+                Integer totalTokens = response != null && response.getUsage() != null
+                        ? response.getUsage().getTotalTokens()
+                        : 0;
+                log.debug("DashScopeReranker: reranked {} documents, totalTokens={}",
+                        documents.size(), totalTokens);
                 break; // success
             } catch (ResourceAccessException e) {
                 log.warn("DashScopeReranker: connection failed (attempt {}/{}): {}",
@@ -152,8 +154,9 @@ public class DashScopeReranker implements Reranker {
                 }
                 sleepBackoff(retry);
             } catch (RestClientResponseException e) {
-                if (e.getStatusCode().value() == 403) {
-                    log.warn("DashScopeReranker: Access Denied (403) — your API key may not have Rerank model access. Marking unavailable.");
+                if (isNonRetryableConfigurationError(e.getStatusCode().value())) {
+                    log.warn("DashScopeReranker: non-retryable configuration error HTTP {}, marking unavailable",
+                            e.getStatusCode().value());
                     accessDenied = true;
                     return candidates;
                 }
@@ -175,12 +178,6 @@ public class DashScopeReranker implements Reranker {
             }
         }
 
-        // Update scores and re-sort
-        for (int i = 0; i < scores.length; i++) {
-            if (scores[i] > 0) {
-                candidates.get(i).rerankScore(scores[i]);
-            }
-        }
         candidates.sort(Comparator.comparing(
                 (RetrievalCandidate c) -> c.rerankScore() != null ? c.rerankScore() : 0.0).reversed());
 
@@ -190,6 +187,25 @@ public class DashScopeReranker implements Reranker {
         }
 
         return candidates;
+    }
+
+    private Map<String, Object> buildRequestBody(String query, List<String> documents) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        if (isQwen3Rerank()) {
+            body.put("query", query);
+            body.put("documents", documents);
+            body.put("top_n", Math.min(documents.size(), 50));
+            body.put("instruct", "Given a user question, retrieve passages that answer the question.");
+            return body;
+        }
+        body.put("input", Map.of("query", query, "documents", documents));
+        body.put("parameters", Map.of("top_n", Math.min(documents.size(), 50)));
+        return body;
+    }
+
+    private boolean isQwen3Rerank() {
+        return "qwen3-rerank".equalsIgnoreCase(model);
     }
 
     private void sleepBackoff(int retry) {
@@ -204,15 +220,30 @@ public class DashScopeReranker implements Reranker {
         return httpStatus == 429 || httpStatus == 408 || httpStatus >= 500;
     }
 
+    private boolean isNonRetryableConfigurationError(int httpStatus) {
+        return httpStatus == 400 || httpStatus == 401 || httpStatus == 403 || httpStatus == 404;
+    }
+
     // ---- JSON response mapping ----
 
     @Data
     @JsonIgnoreProperties(ignoreUnknown = true)
     static class DashScopeRerankResponse {
+        private List<DashScopeRerankResult> results;
         private DashScopeOutput output;
         private DashScopeUsage usage;
         @JsonProperty("request_id")
         private String requestId;
+
+        private List<DashScopeRerankResult> results() {
+            if (results != null) {
+                return results;
+            }
+            if (output != null && output.getResults() != null) {
+                return output.getResults();
+            }
+            return List.of();
+        }
     }
 
     @Data
@@ -227,7 +258,7 @@ public class DashScopeReranker implements Reranker {
         private Integer index;
         @JsonProperty("relevance_score")
         private Double relevanceScore;
-        private String document;
+        private Object document;
     }
 
     @Data

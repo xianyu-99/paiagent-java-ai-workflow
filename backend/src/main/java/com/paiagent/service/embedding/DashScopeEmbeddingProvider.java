@@ -17,11 +17,20 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
-public class DashScopeEmbeddingProvider implements EmbeddingProvider {
+public class DashScopeEmbeddingProvider implements EmbeddingProvider, AutoCloseable {
 
     private final RagEmbeddingProperties properties;
 
@@ -31,10 +40,13 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
 
     private final EmbeddingRequestLimiter requestLimiter;
 
+    private final SingleTextBatcher singleTextBatcher;
+
     public DashScopeEmbeddingProvider(RagEmbeddingProperties properties) {
         this.properties = properties;
         this.dimensions = Math.max(1, properties.getDimensions() == null ? 1024 : properties.getDimensions());
         this.requestLimiter = new EmbeddingRequestLimiter(maxConcurrentRequests(), rateLimitPermitsPerSecond());
+        this.singleTextBatcher = requestBatchingEnabled() ? new SingleTextBatcher() : null;
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(timeoutMs()));
         requestFactory.setReadTimeout(Duration.ofMillis(timeoutMs()));
@@ -46,6 +58,9 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
 
     @Override
     public List<Double> embed(String text) {
+        if (singleTextBatcher != null) {
+            return singleTextBatcher.embed(text == null ? "" : text);
+        }
         List<List<Double>> embeddings = embedBatch(List.of(text == null ? "" : text));
         return embeddings.isEmpty() ? zeroVector() : embeddings.get(0);
     }
@@ -61,7 +76,7 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
         }
 
         List<List<Double>> result = new ArrayList<>(texts.size());
-        int batchSize = Math.max(1, properties.getBatchSize() == null ? 16 : properties.getBatchSize());
+        int batchSize = batchSize();
         for (int start = 0; start < texts.size(); start += batchSize) {
             int end = Math.min(start + batchSize, texts.size());
             result.addAll(requestBatch(texts.subList(start, end), apiKey));
@@ -87,6 +102,13 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
     @Override
     public int dimensions() {
         return dimensions;
+    }
+
+    @Override
+    public void close() {
+        if (singleTextBatcher != null) {
+            singleTextBatcher.close();
+        }
     }
 
     private List<List<Double>> requestBatch(List<String> texts, String apiKey) {
@@ -127,6 +149,20 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
 
     private int timeoutMs() {
         return Math.max(1000, properties.getTimeoutMs() == null ? 30000 : properties.getTimeoutMs());
+    }
+
+    private int batchSize() {
+        return Math.max(1, properties.getBatchSize() == null ? 16 : properties.getBatchSize());
+    }
+
+    private boolean requestBatchingEnabled() {
+        return Boolean.TRUE.equals(properties.getRequestBatchingEnabled()) && batchSize() > 1;
+    }
+
+    private int requestBatchWindowMs() {
+        return Math.max(0, properties.getRequestBatchWindowMs() == null
+                ? 20
+                : properties.getRequestBatchWindowMs());
     }
 
     private int maxConcurrentRequests() {
@@ -224,6 +260,123 @@ public class DashScopeEmbeddingProvider implements EmbeddingProvider {
             vector.add(0.0);
         }
         return vector;
+    }
+
+    private long batchAwaitTimeoutMs() {
+        long retryBudget = (long) retryMaxAttempts() * (timeoutMs() + retryMaxBackoffMs());
+        return Math.max(timeoutMs(), retryBudget + 5_000L);
+    }
+
+    private ThreadFactory daemonThreadFactory(String prefix) {
+        AtomicInteger counter = new AtomicInteger();
+        return runnable -> {
+            Thread thread = new Thread(runnable, prefix + "-" + counter.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
+    private class SingleTextBatcher {
+        private final Object lock = new Object();
+        private final List<PendingEmbedding> pending = new ArrayList<>();
+        private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
+                daemonThreadFactory("rag-embedding-batch-scheduler"));
+        private final ExecutorService workerPool = Executors.newFixedThreadPool(
+                maxConcurrentRequests(),
+                daemonThreadFactory("rag-embedding-batch-worker"));
+        private ScheduledFuture<?> scheduledFlush;
+
+        private List<Double> embed(String text) {
+            CompletableFuture<List<Double>> future = new CompletableFuture<>();
+            boolean flushNow = false;
+            synchronized (lock) {
+                pending.add(new PendingEmbedding(text, future));
+                if (pending.size() >= batchSize()) {
+                    cancelScheduledFlush();
+                    flushNow = true;
+                } else if (scheduledFlush == null || scheduledFlush.isDone()) {
+                    scheduledFlush = scheduler.schedule(this::dispatch, requestBatchWindowMs(), TimeUnit.MILLISECONDS);
+                }
+            }
+
+            if (flushNow) {
+                dispatch();
+            }
+
+            try {
+                return future.get(batchAwaitTimeoutMs(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for batched embedding result", e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof RuntimeException runtimeException) {
+                    throw runtimeException;
+                }
+                throw new IllegalStateException("Batched embedding request failed", cause);
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                throw new IllegalStateException("Timed out while waiting for batched embedding result", e);
+            }
+        }
+
+        private void dispatch() {
+            List<PendingEmbedding> batch = drainBatch();
+            if (batch.isEmpty()) {
+                return;
+            }
+            workerPool.execute(() -> completeBatch(batch));
+        }
+
+        private List<PendingEmbedding> drainBatch() {
+            synchronized (lock) {
+                if (pending.isEmpty()) {
+                    scheduledFlush = null;
+                    return List.of();
+                }
+                int limit = Math.min(batchSize(), pending.size());
+                List<PendingEmbedding> batch = new ArrayList<>(pending.subList(0, limit));
+                pending.subList(0, limit).clear();
+                scheduledFlush = null;
+                if (!pending.isEmpty()) {
+                    scheduledFlush = scheduler.schedule(this::dispatch, requestBatchWindowMs(), TimeUnit.MILLISECONDS);
+                }
+                return batch;
+            }
+        }
+
+        private void completeBatch(List<PendingEmbedding> batch) {
+            try {
+                String apiKey = resolveApiKey();
+                List<String> texts = batch.stream().map(PendingEmbedding::text).toList();
+                List<List<Double>> embeddings = requestBatch(texts, apiKey);
+                if (embeddings.size() != batch.size()) {
+                    throw new IllegalStateException("Batched embedding result size does not match request size");
+                }
+                for (int i = 0; i < batch.size(); i++) {
+                    batch.get(i).future().complete(embeddings.get(i));
+                }
+            } catch (RuntimeException e) {
+                for (PendingEmbedding request : batch) {
+                    request.future().completeExceptionally(e);
+                }
+            }
+        }
+
+        private void cancelScheduledFlush() {
+            if (scheduledFlush != null) {
+                scheduledFlush.cancel(false);
+                scheduledFlush = null;
+            }
+        }
+
+        private void close() {
+            scheduler.shutdownNow();
+            workerPool.shutdownNow();
+        }
+    }
+
+    private record PendingEmbedding(String text, CompletableFuture<List<Double>> future) {
     }
 
     private static class EmbeddingRequestLimiter {

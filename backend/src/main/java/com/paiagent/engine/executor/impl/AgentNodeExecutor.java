@@ -16,6 +16,7 @@ import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.engine.reference.WorkflowReferenceResolver;
 import com.paiagent.entity.LLMGlobalConfig;
 import com.paiagent.service.LLMGlobalConfigService;
+import com.paiagent.service.SkillEvolutionService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +44,9 @@ public class AgentNodeExecutor implements NodeExecutor {
     @Autowired
     private AgentMemoryService agentMemoryService;
 
+    @Autowired(required = false)
+    private SkillEvolutionService skillEvolutionService;
+
     /**
      * Agent节点配置
      */
@@ -63,6 +67,9 @@ public class AgentNodeExecutor implements NodeExecutor {
         boolean enableExecutionMemory;
         int memoryTopK = 3;
         double memoryMinScore = 0.5;
+        String collaborationMode = "single";
+        boolean reviewerEnabled = true;
+        String skillName;
     }
 
     @Override
@@ -110,14 +117,15 @@ public class AgentNodeExecutor implements NodeExecutor {
 
         // 6.5 检索长期记忆上下文
         Long flowId = input != null ? extractFlowId(input) : null;
+        AgentMemoryService.MemoryContextResult memoryContextResult = null;
         if (config.knowledgeBaseId != null || config.enableExecutionMemory) {
             try {
-                String memoryContext = agentMemoryService.buildMemoryContext(
+                memoryContextResult = agentMemoryService.buildMemoryContextWithMetadata(
                         task, config.knowledgeBaseId, flowId,
                         config.enableExecutionMemory, config.memoryTopK, config.memoryMinScore);
-                if (memoryContext != null) {
-                    state.setMemoryContext(memoryContext);
-                    log.debug("Agent 记忆上下文注入成功，长度: {}", memoryContext.length());
+                if (memoryContextResult != null) {
+                    applyMemoryContext(state, memoryContextResult);
+                    log.debug("Agent 记忆上下文注入成功，长度: {}", memoryContextResult.content().length());
                 }
             } catch (Exception e) {
                 log.warn("Agent 记忆上下文检索失败，继续执行: {}", e.getMessage());
@@ -128,6 +136,20 @@ public class AgentNodeExecutor implements NodeExecutor {
         if (progressCallback != null) {
             progressCallback.accept(ExecutionEvent.nodeProgress(
                     nodeId, "agent", "开始推理...", Map.of("iteration", 0)));
+        }
+
+        if ("planner_worker_reviewer".equalsIgnoreCase(config.collaborationMode)) {
+            AgentRunResult runResult = executeCollaborative(
+                    nodeId, sessionId, task, config, reasoningEngine, availableTools, chatClient,
+                    memoryContextResult, progressCallback);
+            Map<String, Object> output = buildOutput(runResult.finalState());
+            output.put("collaborationMode", config.collaborationMode);
+            output.put("agentTrace", runResult.trace());
+            output.put("skillEvolutionCandidateRecorded",
+                    recordSkillEvolutionCandidate(config, runResult.finalState()));
+            log.info("Agent collaborative execution completed - stages={}, finalFinished={}",
+                    runResult.trace().size(), runResult.finalState().isFinished());
+            return output;
         }
 
         int iteration = 0;
@@ -234,6 +256,7 @@ public class AgentNodeExecutor implements NodeExecutor {
 
         // 8. 构建输出
         Map<String, Object> output = buildOutput(state);
+        output.put("skillEvolutionCandidateRecorded", recordSkillEvolutionCandidate(config, state));
         log.info("Agent 节点执行完成 - 迭代次数: {}, 是否成功: {}, 记忆上下文: {}",
                 state.getCurrentIteration(), state.isFinished(),
                 state.getMemoryContext() != null ? "已注入 (" + state.getMemoryContext().length() + " 字符)" : "无");
@@ -245,6 +268,319 @@ public class AgentNodeExecutor implements NodeExecutor {
     /**
      * 从节点数据中提取配置
      */
+    private AgentRunResult executeCollaborative(
+            String nodeId,
+            String sessionId,
+            String task,
+            AgentNodeConfig config,
+            ReasoningEngine reasoningEngine,
+            List<Tool> availableTools,
+            ChatClient chatClient,
+            AgentMemoryService.MemoryContextResult memoryContextResult,
+            Consumer<ExecutionEvent> progressCallback
+    ) {
+        List<Map<String, Object>> trace = new ArrayList<>();
+
+        AgentState planner = runAgentLoop(
+                nodeId,
+                sessionId + ":planner",
+                "Plan the work for this task. Return a concise plan.\nTask: " + task,
+                appendRole(config.systemPrompt, "planner"),
+                config,
+                reasoningEngine,
+                availableTools,
+                chatClient,
+                memoryContextResult,
+                "planner",
+                progressCallback
+        );
+        trace.add(buildStageTrace("planner", planner));
+
+        String plan = planner.getFinalAnswer() != null ? planner.getFinalAnswer() : planner.getErrorMessage();
+        AgentState worker = runAgentLoop(
+                nodeId,
+                sessionId + ":worker",
+                "Solve the task using the plan.\nTask: " + task + "\nPlan: " + nullToEmpty(plan),
+                appendRole(config.systemPrompt, "worker"),
+                config,
+                reasoningEngine,
+                availableTools,
+                chatClient,
+                memoryContextResult,
+                "worker",
+                progressCallback
+        );
+        trace.add(buildStageTrace("worker", worker));
+
+        AgentState finalState = worker;
+        if (config.reviewerEnabled) {
+            String workerAnswer = worker.getFinalAnswer() != null ? worker.getFinalAnswer() : worker.getErrorMessage();
+            AgentState reviewer = runAgentLoop(
+                    nodeId,
+                    sessionId + ":reviewer",
+                    "Review the answer against the task and memory. If it is acceptable, return the improved final answer.\n"
+                            + "Task: " + task + "\nPlan: " + nullToEmpty(plan) + "\nAnswer: " + nullToEmpty(workerAnswer),
+                    appendRole(config.systemPrompt, "reviewer"),
+                    config,
+                    reasoningEngine,
+                    availableTools,
+                    chatClient,
+                    memoryContextResult,
+                    "reviewer",
+                    progressCallback
+            );
+            trace.add(buildStageTrace("reviewer", reviewer));
+            if (!isBlank(reviewer.getFinalAnswer())) {
+                finalState = reviewer;
+            } else if (!isBlank(reviewer.getErrorMessage())) {
+                log.warn("Agent reviewer failed; preserving worker result. error={}", reviewer.getErrorMessage());
+            }
+        }
+
+        return new AgentRunResult(finalState, trace);
+    }
+
+    private AgentState runAgentLoop(
+            String nodeId,
+            String sessionId,
+            String task,
+            String systemPrompt,
+            AgentNodeConfig config,
+            ReasoningEngine reasoningEngine,
+            List<Tool> availableTools,
+            ChatClient chatClient,
+            AgentMemoryService.MemoryContextResult memoryContextResult,
+            String stage,
+            Consumer<ExecutionEvent> progressCallback
+    ) {
+        AgentState state = new AgentState(sessionId, task, config.maxIterations);
+        state.setSystemPrompt(systemPrompt);
+        applyMemoryContext(state, memoryContextResult);
+
+        if (progressCallback != null) {
+            progressCallback.accept(ExecutionEvent.nodeProgress(
+                    nodeId, "agent", "agent stage started",
+                    Map.of("stage", stage, "iteration", 0)));
+        }
+
+        int iteration = 0;
+        while (iteration < config.maxIterations) {
+            iteration++;
+            ReasoningResult result = reasoningEngine.reason(state, availableTools, chatClient);
+            state.addThought(iteration, result.getThought() != null ? result.getThought() : "");
+
+            if (progressCallback != null) {
+                Map<String, Object> progressData = new HashMap<>();
+                progressData.put("stage", stage);
+                progressData.put("iteration", iteration);
+                progressData.put("type", result.getType().name());
+                progressCallback.accept(ExecutionEvent.nodeProgress(
+                        nodeId, "agent", "agent stage progress", progressData));
+            }
+
+            switch (result.getType()) {
+                case FINAL_ANSWER -> state.finish(result.getFinalAnswer());
+                case ERROR -> state.fail(result.getErrorMessage());
+                case ACTION -> {
+                    state.addAction(result.getAction(), result.getActionInput());
+                    String observation = executeToolAction(result, availableTools);
+                    state.addObservation(observation);
+                }
+                case THOUGHT -> state.addObservation("(no action taken)");
+            }
+
+            if (state.isFinished()) {
+                break;
+            }
+            if (state.hasReachedMaxIterations()) {
+                state.fail("Maximum iterations reached");
+                break;
+            }
+        }
+        return state;
+    }
+
+    private void applyMemoryContext(AgentState state, AgentMemoryService.MemoryContextResult memoryContextResult) {
+        if (state == null || memoryContextResult == null) {
+            return;
+        }
+        state.setMemoryContext(memoryContextResult.content());
+        state.setMemoryCompressed(memoryContextResult.compressed());
+        state.setMemoryCompressionRatio(memoryContextResult.compressionRatio());
+    }
+
+    private String executeToolAction(ReasoningResult result, List<Tool> availableTools) {
+        Optional<Tool> toolOpt = availableTools.stream()
+                .filter(tool -> tool.getName().equals(result.getAction()))
+                .findFirst();
+        if (toolOpt.isEmpty()) {
+            return "Error: Tool not found: " + result.getAction();
+        }
+        try {
+            return toolOpt.get().execute(parseActionInput(result.getActionInput()));
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    private String appendRole(String systemPrompt, String role) {
+        String base = systemPrompt == null ? "" : systemPrompt.trim();
+        String rolePrompt = switch (role) {
+            case "planner" -> "You are the planner agent. Decompose the task into concise steps.";
+            case "worker" -> "You are the worker agent. Execute the plan and produce the answer.";
+            case "reviewer" -> "You are the reviewer agent. Check factual support, citations, and completeness.";
+            default -> "You are an agent.";
+        };
+        return base.isBlank() ? rolePrompt : base + "\n\n" + rolePrompt;
+    }
+
+    private Map<String, Object> buildStageTrace(String stage, AgentState state) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("stage", stage);
+        item.put("finished", state.isFinished());
+        item.put("iterations", state.getCurrentIteration());
+        item.put("finalAnswer", state.getFinalAnswer());
+        item.put("error", state.getErrorMessage());
+        return item;
+    }
+
+    private boolean recordSkillEvolutionCandidate(AgentNodeConfig config, AgentState state) {
+        if (skillEvolutionService == null || isBlank(config.skillName)) {
+            return false;
+        }
+
+        String error = state.getErrorMessage();
+        String finalAnswer = state.getFinalAnswer();
+        boolean failed = !isBlank(error);
+        boolean blankAnswer = isBlank(finalAnswer) && !failed;
+        boolean memoryCompressed = state.isMemoryCompressed();
+        SkillEvolutionIssue answerQualityIssue = detectAnswerQualityIssue(finalAnswer);
+        if (!failed && !blankAnswer && answerQualityIssue == null && !memoryCompressed) {
+            return false;
+        }
+
+        String feedbackType = failed ? "AGENT_FAILURE" : blankAnswer ? "BLANK_ANSWER"
+                : answerQualityIssue != null ? answerQualityIssue.feedbackType()
+                : "CONTEXT_COMPRESSED";
+        String summary = failed ? error : blankAnswer ? "Agent returned blank answer."
+                : answerQualityIssue != null ? answerQualityIssue.summary()
+                : "Memory context was compressed; review whether the skill should request narrower evidence.";
+        String proposedPatch = "Review skill `" + config.skillName + "` for task: "
+                + summarizeForLog(state.getTask());
+        try {
+            skillEvolutionService.recordCandidate(
+                    config.skillName,
+                    "AGENT_EXECUTION",
+                    null,
+                    feedbackType,
+                    summary,
+                    proposedPatch
+            );
+            return true;
+        } catch (Exception e) {
+            log.warn("Failed to record skill evolution candidate: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private SkillEvolutionIssue detectAnswerQualityIssue(String finalAnswer) {
+        Map<String, Object> answer = parseStructuredAnswer(finalAnswer);
+        if (answer == null || !looksLikeQualityAwareAnswer(answer)) {
+            return null;
+        }
+
+        Double confidence = toDouble(answer.get("confidence"));
+        if (confidence != null && confidence < 0.5d) {
+            return new SkillEvolutionIssue(
+                    "LOW_CONFIDENCE",
+                    "Agent returned low confidence answer (confidence=" + confidence + ")."
+            );
+        }
+
+        if (!isBlank(trimString(answer.get("answer"))) && isCitationMissing(answer.get("citations"))) {
+            return new SkillEvolutionIssue(
+                    "MISSING_CITATION",
+                    "Agent returned a structured answer without citations."
+            );
+        }
+
+        return null;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseStructuredAnswer(String finalAnswer) {
+        String normalized = normalizeStructuredAnswerText(finalAnswer);
+        if (isBlank(normalized) || !normalized.startsWith("{") || !normalized.endsWith("}")) {
+            return null;
+        }
+        try {
+            Object parsed = JSON.parseObject(normalized, Map.class);
+            return parsed instanceof Map<?, ?> map ? (Map<String, Object>) map : null;
+        } catch (JSONException e) {
+            log.debug("Final answer is not structured JSON for skill evolution detection: {}", summarizeForLog(finalAnswer));
+            return null;
+        }
+    }
+
+    private String normalizeStructuredAnswerText(String finalAnswer) {
+        if (finalAnswer == null) {
+            return null;
+        }
+        String trimmed = finalAnswer.trim();
+        if (trimmed.startsWith("```")) {
+            trimmed = trimmed.replaceFirst("^```(?:json)?\\s*", "");
+            trimmed = trimmed.replaceFirst("\\s*```$", "");
+        }
+        return trimmed.trim();
+    }
+
+    private boolean looksLikeQualityAwareAnswer(Map<String, Object> answer) {
+        return answer.containsKey("answer")
+                || answer.containsKey("citations")
+                || answer.containsKey("confidence")
+                || answer.containsKey("resolved")
+                || answer.containsKey("nextAction")
+                || answer.containsKey("ticketSummary")
+                || answer.containsKey("escalationReason");
+    }
+
+    private boolean isCitationMissing(Object citations) {
+        if (citations == null) {
+            return true;
+        }
+        if (citations instanceof Collection<?> collection) {
+            return collection.isEmpty();
+        }
+        if (citations instanceof Map<?, ?> map) {
+            return map.isEmpty();
+        }
+        return citations.toString().isBlank();
+    }
+
+    private Double toDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private record AgentRunResult(AgentState finalState, List<Map<String, Object>> trace) {
+    }
+
+    private record SkillEvolutionIssue(String feedbackType, String summary) {
+    }
+
     @SuppressWarnings("unchecked")
     private AgentNodeConfig extractConfig(WorkflowNode node) {
         Map<String, Object> data = node.getData();
@@ -342,6 +678,20 @@ public class AgentNodeExecutor implements NodeExecutor {
         } else {
             config.memoryMinScore = 0.5;
         }
+
+        String collaborationMode = trimString(data.get("collaborationMode"));
+        if ("planner_worker_reviewer".equalsIgnoreCase(collaborationMode)) {
+            config.collaborationMode = "planner_worker_reviewer";
+        } else {
+            config.collaborationMode = "single";
+        }
+        Object reviewerEnabledObj = data.get("reviewerEnabled");
+        if (reviewerEnabledObj instanceof Boolean b) {
+            config.reviewerEnabled = b;
+        } else if (reviewerEnabledObj != null) {
+            config.reviewerEnabled = Boolean.parseBoolean(reviewerEnabledObj.toString());
+        }
+        config.skillName = trimString(data.get("skillName"));
 
         return config;
     }
@@ -507,6 +857,11 @@ public class AgentNodeExecutor implements NodeExecutor {
         output.put("error", state.getErrorMessage());
         output.put("thoughts", buildThoughtsList(state));
         output.put("memoryContext", state.getMemoryContext());
+        output.put("memoryCompressed", state.isMemoryCompressed());
+        output.put("memoryCompressionRatio", state.getMemoryCompressionRatio());
+        output.put("collaborationMode", state.getSessionId() != null && state.getSessionId().contains(":")
+                ? "planner_worker_reviewer"
+                : "single");
         output.put("inputTokens", 0);
         output.put("outputTokens", 0);
         output.put("totalTokens", 0);

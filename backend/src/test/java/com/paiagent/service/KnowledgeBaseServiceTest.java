@@ -14,14 +14,17 @@ import com.paiagent.mapper.KnowledgeDocumentMapper;
 import com.paiagent.mapper.KnowledgeImportTaskMapper;
 import com.paiagent.service.document.DocumentParsingService;
 import com.paiagent.service.rag.RagRetrievalScorer;
+import com.paiagent.service.rag.RetrievalPersonalization;
 import com.paiagent.service.vector.KnowledgeVectorStore;
 import com.paiagent.service.vector.VectorSearchHit;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -41,7 +44,7 @@ class KnowledgeBaseServiceTest {
         KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
         TextEmbeddingService embeddingService = mock(TextEmbeddingService.class);
         KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
-        RagRetrievalScorer scorer = new RagRetrievalScorer(new ChineseTokenizer("的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16));
+        RagRetrievalScorer scorer = scorer();
 
         KnowledgeBaseService service = new KnowledgeBaseService(
                 mock(KnowledgeBaseMapper.class),
@@ -55,11 +58,11 @@ class KnowledgeBaseServiceTest {
                 mock(ThreadPoolTaskExecutor.class)
         );
 
-        KnowledgeChunk previous = chunk(1L, 1L, 10L, 0, "上一段介绍知识库准备");
-        KnowledgeChunk center = chunk(2L, 1L, 10L, 1, "这一段介绍知识库导入");
-        KnowledgeChunk next = chunk(3L, 1L, 10L, 2, "下一段介绍检索调试");
+        KnowledgeChunk previous = chunk(1L, 1L, 10L, 0, "previous knowledge import preparation");
+        KnowledgeChunk center = chunk(2L, 1L, 10L, 1, "current knowledge import guide");
+        KnowledgeChunk next = chunk(3L, 1L, 10L, 2, "next retrieval debugging note");
 
-        when(embeddingService.embed("知识库导入")).thenReturn(List.of(0.1, 0.2));
+        when(embeddingService.embed("knowledge import")).thenReturn(List.of(0.1, 0.2));
         when(embeddingService.isCompatible(any(), any(), any())).thenReturn(true);
         when(vectorStore.search(eq(1L), any(), eq(13), eq(0.0)))
                 .thenReturn(List.of(new VectorSearchHit(2L, 0.91)));
@@ -67,17 +70,17 @@ class KnowledgeBaseServiceTest {
         when(chunkMapper.selectList(any()))
                 .thenReturn(List.of(), List.of(previous, center, next));
 
-        List<RetrievedChunk> chunks = service.retrieve(1L, "知识库导入", 1, 0.0, 1, 2000);
+        List<RetrievedChunk> chunks = service.retrieve(1L, "knowledge import", 1, 0.0, 1, 2000);
 
         assertEquals(1, chunks.size());
         RetrievedChunk retrieved = chunks.get(0);
         assertEquals(1, retrieved.getRank());
         assertTrue(retrieved.getKeywordScore() > 0.0);
         assertEquals(List.of(0, 1, 2), retrieved.getContextChunkIndexes());
-        assertTrue(retrieved.getContextContent().contains("上一段介绍知识库准备"));
-        assertTrue(retrieved.getContextContent().contains("这一段介绍知识库导入"));
-        assertTrue(retrieved.getContextContent().contains("下一段介绍检索调试"));
-        assertTrue(retrieved.getMatchedTerms().contains("知识库"));
+        assertTrue(retrieved.getContextContent().contains("previous knowledge import preparation"));
+        assertTrue(retrieved.getContextContent().contains("current knowledge import guide"));
+        assertTrue(retrieved.getContextContent().contains("next retrieval debugging note"));
+        assertTrue(retrieved.getMatchedTerms().contains("knowledge"));
     }
 
     @Test
@@ -93,7 +96,7 @@ class KnowledgeBaseServiceTest {
                 embeddingService,
                 vectorStore,
                 mock(DocumentParsingService.class),
-                new RagRetrievalScorer(new ChineseTokenizer("的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16)),
+                scorer(),
                 mock(ThreadPoolTaskExecutor.class)
         );
 
@@ -159,6 +162,56 @@ class KnowledgeBaseServiceTest {
         assertTrue(sqlSegment.contains("IS NULL"));
     }
 
+    @Test
+    void retrieveAuthorizedShouldBoostChunksMatchingUserProfile() {
+        KnowledgeBaseMapper knowledgeBaseMapper = mock(KnowledgeBaseMapper.class);
+        KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
+        TextEmbeddingService embeddingService = mock(TextEmbeddingService.class);
+        KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
+        UserRetrievalProfileService profileService = mock(UserRetrievalProfileService.class);
+        KnowledgeBaseService service = new KnowledgeBaseService(
+                knowledgeBaseMapper,
+                mock(KnowledgeDocumentMapper.class),
+                chunkMapper,
+                mock(KnowledgeImportTaskMapper.class),
+                embeddingService,
+                vectorStore,
+                mock(DocumentParsingService.class),
+                scorer(),
+                mock(ThreadPoolTaskExecutor.class)
+        );
+        ReflectionTestUtils.setField(service, "userRetrievalProfileService", profileService);
+
+        KnowledgeChunk generic = chunk(31L, 1L, 50L, 0, "General account troubleshooting guide");
+        KnowledgeChunk vpn = chunk(32L, 1L, 51L, 0, "VPN certificate reset flow handled by IT");
+
+        when(knowledgeBaseMapper.selectById(1L)).thenReturn(knowledgeBase(1L, null, null));
+        when(embeddingService.embed("VPN issue")).thenReturn(List.of(0.1, 0.2));
+        when(embeddingService.isCompatible(any(), any(), any())).thenReturn(true);
+        when(vectorStore.search(eq(1L), any(), eq(14), eq(0.0)))
+                .thenReturn(List.of(
+                        new VectorSearchHit(31L, 0.90d),
+                        new VectorSearchHit(32L, 0.85d)
+                ));
+        when(chunkMapper.selectBatchIds(anyCollection())).thenReturn(List.of(generic, vpn));
+        when(chunkMapper.selectList(any())).thenReturn(List.of());
+        when(profileService.buildProfile(2L, "VPN issue"))
+                .thenReturn(new RetrievalPersonalization(2L, Map.of(
+                        "VPN", 20.0d,
+                        "certificate", 20.0d,
+                        "IT", 20.0d
+                )));
+
+        List<RetrievedChunk> chunks = service.retrieveAuthorized(1L, "VPN issue", 1, 0.0, 0, 2000, 2L, false);
+
+        assertEquals(1, chunks.size());
+        assertEquals(32L, chunks.get(0).getChunkId());
+        assertEquals(1, chunks.get(0).getRank());
+        assertTrue(chunks.get(0).getPersonalizationScore() > 0.0d);
+        assertTrue(chunks.get(0).getPersonalizationReasons().contains("profile:VPN"));
+        verify(profileService).recordInteraction(eq(2L), eq("VPN issue"), any());
+    }
+
     private KnowledgeBaseService createService(KnowledgeBaseMapper knowledgeBaseMapper) {
         return new KnowledgeBaseService(
                 knowledgeBaseMapper,
@@ -168,9 +221,13 @@ class KnowledgeBaseServiceTest {
                 mock(TextEmbeddingService.class),
                 mock(KnowledgeVectorStore.class),
                 mock(DocumentParsingService.class),
-                new RagRetrievalScorer(new ChineseTokenizer("的,了,在,是,我,有,和,就,不,人,都,一,一个,上,也,很,到,说,要,去,你,会,着,没有,看,好,自己,这", 16)),
+                scorer(),
                 mock(ThreadPoolTaskExecutor.class)
         );
+    }
+
+    private RagRetrievalScorer scorer() {
+        return new RagRetrievalScorer(new ChineseTokenizer("a,the,and,or,to,of", 16));
     }
 
     private KnowledgeBase knowledgeBase(Long id, Long ownerId, Integer deleted) {
@@ -189,7 +246,7 @@ class KnowledgeBaseServiceTest {
         chunk.setChunkIndex(chunkIndex);
         chunk.setContent(content);
         chunk.setSourceName("rag-guide.md");
-        chunk.setSectionTitle("导入说明");
+        chunk.setSectionTitle("import guide");
         chunk.setPageNumber(1);
         return chunk;
     }

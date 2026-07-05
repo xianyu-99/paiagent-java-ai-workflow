@@ -20,6 +20,10 @@ public final class LLMProviderRegistry {
     private static final Map<String, String> PROVIDER_ALIASES = Map.ofEntries(
             Map.entry("open ai", "openai"),
             Map.entry("deep seek", "deepseek"),
+            Map.entry("local qwen", "local_qwen"),
+            Map.entry("qwen local", "local_qwen"),
+            Map.entry("qwen2.5", "local_qwen"),
+            Map.entry("qwen2.5-7b", "local_qwen"),
             Map.entry("通义千问", "qwen"),
             Map.entry("stepfun", "step"),
             Map.entry("阶跃星辰", "step"),
@@ -48,6 +52,7 @@ public final class LLMProviderRegistry {
     private static final Map<String, String> DEFAULT_BASE_URLS = Map.ofEntries(
             Map.entry("openai", "https://api.openai.com"),
             Map.entry("deepseek", "https://api.deepseek.com"),
+            Map.entry("local_qwen", "http://127.0.0.1:11434/v1"),
             Map.entry("qwen", "https://dashscope.aliyuncs.com/compatible-mode"),
             Map.entry("moonshot", "https://api.moonshot.cn"),
             Map.entry("kimi_code", "https://api.kimi.com/coding"),

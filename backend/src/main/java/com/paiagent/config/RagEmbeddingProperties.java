@@ -26,6 +26,10 @@ public class RagEmbeddingProperties {
 
     private Integer batchSize = 16;
 
+    private Boolean requestBatchingEnabled = true;
+
+    private Integer requestBatchWindowMs = 20;
+
     private Boolean cacheEnabled = true;
 
     private Integer cacheTtlSeconds = 3600;

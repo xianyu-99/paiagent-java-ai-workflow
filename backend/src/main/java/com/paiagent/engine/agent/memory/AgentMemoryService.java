@@ -2,6 +2,8 @@ package com.paiagent.engine.agent.memory;
 
 import com.alibaba.fastjson2.JSON;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.paiagent.engine.agent.context.ContextCompressionResult;
+import com.paiagent.engine.agent.context.ContextCompressor;
 import com.paiagent.entity.ExecutionRecord;
 import com.paiagent.entity.KnowledgeChunk;
 import com.paiagent.mapper.ExecutionRecordMapper;
@@ -31,15 +33,18 @@ public class AgentMemoryService {
     private final KnowledgeVectorStore vectorStore;
     private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final ExecutionRecordMapper executionRecordMapper;
+    private final ContextCompressor contextCompressor;
 
     public AgentMemoryService(TextEmbeddingService textEmbeddingService,
                               KnowledgeVectorStore vectorStore,
                               KnowledgeChunkMapper knowledgeChunkMapper,
-                              ExecutionRecordMapper executionRecordMapper) {
+                              ExecutionRecordMapper executionRecordMapper,
+                              ContextCompressor contextCompressor) {
         this.textEmbeddingService = textEmbeddingService;
         this.vectorStore = vectorStore;
         this.knowledgeChunkMapper = knowledgeChunkMapper;
         this.executionRecordMapper = executionRecordMapper;
+        this.contextCompressor = contextCompressor;
     }
 
     /**
@@ -213,8 +218,8 @@ public class AgentMemoryService {
      * @param minScore               知识检索最小相似度阈值
      * @return 组合后的记忆上下文字符串，两者皆空返回 null
      */
-    public String buildMemoryContext(String query, Long knowledgeBaseId, Long flowId,
-                                     boolean enableExecutionMemory, int topK, double minScore) {
+    public MemoryContextResult buildMemoryContextWithMetadata(String query, Long knowledgeBaseId, Long flowId,
+                                                              boolean enableExecutionMemory, int topK, double minScore) {
         String knowledgeMemory = retrieveKnowledgeMemory(query, knowledgeBaseId, topK, minScore);
         String executionMemory = enableExecutionMemory
                 ? retrieveExecutionMemory(query, flowId, topK)
@@ -239,12 +244,26 @@ public class AgentMemoryService {
         }
 
         String result = sb.toString();
-        if (result.length() > MAX_MEMORY_CONTEXT_LENGTH) {
-            result = result.substring(0, MAX_MEMORY_CONTEXT_LENGTH)
-                    + "\n\n[Memory context truncated due to length limit]";
-            log.warn("Agent 记忆上下文超出长度限制 {}，已截断", MAX_MEMORY_CONTEXT_LENGTH);
+        ContextCompressionResult compressed = contextCompressor.compress(result, query, MAX_MEMORY_CONTEXT_LENGTH);
+        if (compressed.compressed()) {
+            log.warn("Agent memory context compressed: originalChars={}, compressedChars={}, droppedLines={}",
+                    compressed.originalLength(), compressed.compressedLength(), compressed.droppedLineCount());
         }
-        return result;
+        return new MemoryContextResult(
+                compressed.content(),
+                compressed.compressed(),
+                compressed.compressionRatio(),
+                compressed.originalLength(),
+                compressed.compressedLength(),
+                compressed.droppedLineCount()
+        );
+    }
+
+    public String buildMemoryContext(String query, Long knowledgeBaseId, Long flowId,
+                                     boolean enableExecutionMemory, int topK, double minScore) {
+        MemoryContextResult result = buildMemoryContextWithMetadata(
+                query, knowledgeBaseId, flowId, enableExecutionMemory, topK, minScore);
+        return result == null ? null : result.content();
     }
 
     /**
@@ -270,5 +289,15 @@ public class AgentMemoryService {
      * 执行记忆内部记录
      */
     private record ExecutionMemory(String input, String output, double similarity) {
+    }
+
+    public record MemoryContextResult(
+            String content,
+            boolean compressed,
+            double compressionRatio,
+            int originalLength,
+            int compressedLength,
+            int droppedLineCount
+    ) {
     }
 }

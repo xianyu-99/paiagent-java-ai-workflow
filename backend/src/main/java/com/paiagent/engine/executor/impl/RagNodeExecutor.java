@@ -66,13 +66,14 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                                        Map<String, Object> input,
                                        Consumer<ExecutionEvent> progressCallback) throws Exception {
         Map<String, Object> data = node.getData() == null ? Map.of() : node.getData();
+        Map<String, Object> runtimeInput = input == null ? Map.of() : input;
         Long knowledgeBaseId = toLong(data.get("knowledgeBaseId"));
         int topK = toInt(data.get("topK"), 3);
         double minScore = toDouble(data.get("minScore"), 0.0);
         double answerGateThreshold = toDouble(data.get("answerGateThreshold"), minScore);
         int contextWindow = toInt(data.get("contextWindow"), 1);
         int contextMaxChars = toInt(data.get("contextMaxChars"), 1800);
-        String question = resolveQuestion(data, input);
+        String question = resolveQuestion(data, runtimeInput);
 
         if (!StringUtils.hasText(question)) {
             throw new IllegalArgumentException("RAG 节点问题不能为空");
@@ -95,8 +96,8 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             ));
         }
 
-        Long executionUserId = toLong(input.get(EXECUTION_USER_ID_CONTEXT_KEY));
-        boolean executionAdmin = toBoolean(input.get(EXECUTION_ADMIN_CONTEXT_KEY));
+        Long executionUserId = toLong(runtimeInput.get(EXECUTION_USER_ID_CONTEXT_KEY));
+        boolean executionAdmin = toBoolean(runtimeInput.get(EXECUTION_ADMIN_CONTEXT_KEY));
         List<RetrievedChunk> chunks = knowledgeBaseService.retrieveAuthorized(
                 knowledgeBaseId,
                 question,
@@ -147,7 +148,7 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         }
 
         WorkflowNode llmNode = buildSyntheticLlmNode(node, data, question, context);
-        Map<String, Object> output = super.execute(llmNode, input, progressCallback);
+        Map<String, Object> output = super.execute(llmNode, runtimeInput, progressCallback);
         output = applySelfRagGuardrails(output, question, context, chunks);
         return output;
     }
@@ -247,11 +248,11 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             }
         }
 
-        Object output = input.get("output");
+        Object output = input == null ? null : input.get("output");
         if (output != null) {
             return String.valueOf(output);
         }
-        Object rawInput = input.get("input");
+        Object rawInput = input == null ? null : input.get("input");
         return rawInput == null ? null : String.valueOf(rawInput);
     }
 
@@ -262,6 +263,11 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
         return java.util.stream.IntStream.range(0, chunks.size())
                 .mapToObj(index -> {
                     RetrievedChunk chunk = chunks.get(index);
+                    String content = StringUtils.hasText(chunk.getContextContent())
+                            ? chunk.getContextContent()
+                            : chunk.getContent();
+                    String graphEvidence = buildGraphEvidenceBlock(chunk);
+                    String personalizationEvidence = buildPersonalizationEvidenceBlock(chunk);
                     return String.format("[来源%d: %s, score=%.4f, vector=%.4f, keyword=%.4f, matched=%s]\n%s",
                         index + 1,
                         buildCitation(chunk),
@@ -269,9 +275,28 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
                         chunk.getVectorScore(),
                         chunk.getKeywordScore(),
                         chunk.getMatchedTerms(),
-                        StringUtils.hasText(chunk.getContextContent()) ? chunk.getContextContent() : chunk.getContent());
+                        content + graphEvidence + personalizationEvidence);
                 })
                 .collect(Collectors.joining("\n\n---\n\n"));
+    }
+
+    private String buildGraphEvidenceBlock(RetrievedChunk chunk) {
+        if (chunk == null || chunk.getGraphEvidence() == null || chunk.getGraphEvidence().isEmpty()) {
+            return "";
+        }
+        return "\n\n[GraphEvidence]\n" + String.join("\n", chunk.getGraphEvidence());
+    }
+
+    private String buildPersonalizationEvidenceBlock(RetrievedChunk chunk) {
+        if (chunk == null
+                || chunk.getPersonalizationScore() == null
+                || chunk.getPersonalizationScore() <= 0.0d
+                || chunk.getPersonalizationReasons() == null
+                || chunk.getPersonalizationReasons().isEmpty()) {
+            return "";
+        }
+        return "\n\n[Personalization]\nscore=" + String.format("%.4f", chunk.getPersonalizationScore())
+                + ", reasons=" + chunk.getPersonalizationReasons();
     }
 
     private List<Map<String, Object>> buildCitations(List<RetrievedChunk> chunks) {
@@ -293,7 +318,10 @@ public class RagNodeExecutor extends AbstractLLMNodeExecutor {
             citation.put("score", chunk.getScore());
             citation.put("vectorScore", chunk.getVectorScore());
             citation.put("keywordScore", chunk.getKeywordScore());
+            citation.put("personalizationScore", chunk.getPersonalizationScore());
+            citation.put("personalizationReasons", chunk.getPersonalizationReasons());
             citation.put("matchedTerms", chunk.getMatchedTerms());
+            citation.put("graphEvidence", chunk.getGraphEvidence());
             citation.put("preview", previewText(StringUtils.hasText(chunk.getContextContent())
                     ? chunk.getContextContent()
                     : chunk.getContent()));
