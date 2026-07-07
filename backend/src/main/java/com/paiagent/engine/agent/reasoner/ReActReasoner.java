@@ -5,9 +5,12 @@ import com.paiagent.engine.agent.ReActPromptBuilder;
 import com.paiagent.engine.agent.ReasoningEngine;
 import com.paiagent.engine.agent.ReasoningResult;
 import com.paiagent.engine.agent.tool.Tool;
+import com.paiagent.engine.llm.prompt.PromptCacheResult;
+import com.paiagent.engine.llm.prompt.PromptCacheService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -31,6 +34,17 @@ public class ReActReasoner implements ReasoningEngine {
             "Final Answer:\\s*(.+)",
             Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
 
+    private final PromptCacheService promptCacheService;
+
+    public ReActReasoner() {
+        this(PromptCacheService.noop());
+    }
+
+    @Autowired
+    public ReActReasoner(PromptCacheService promptCacheService) {
+        this.promptCacheService = promptCacheService == null ? PromptCacheService.noop() : promptCacheService;
+    }
+
     @Override
     public String getMode() {
         return "react";
@@ -39,8 +53,15 @@ public class ReActReasoner implements ReasoningEngine {
     @Override
     public ReasoningResult reason(AgentState state, List<Tool> availableTools, ChatClient chatClient) {
         // 1. Build system prompt with available tools
-        String systemPrompt = ReActPromptBuilder.buildSystemPrompt(
-                availableTools, state.getSystemPrompt(), state.getMemoryContext());
+        String stableSystemPrompt = ReActPromptBuilder.buildStableSystemPrompt(
+                availableTools, state.getSystemPrompt());
+        PromptCacheResult cachedSystemPrompt = promptCacheService.cacheStablePrompt(
+                "agent.react.system", stableSystemPrompt);
+        if (cachedSystemPrompt.cacheable()) {
+            state.recordPromptCacheLookup(cachedSystemPrompt.hit(), cachedSystemPrompt.estimatedSavedChars());
+        }
+        String systemPrompt = ReActPromptBuilder.appendMemoryContext(
+                cachedSystemPrompt.content(), state.getMemoryContext());
 
         // 2. Build user prompt with task + history
         String userPrompt = ReActPromptBuilder.buildUserPrompt(state.getTask(), state.getHistoryAsText(), state.getMemoryContext());

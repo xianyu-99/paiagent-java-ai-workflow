@@ -8,6 +8,8 @@ import com.paiagent.engine.llm.ChatClientFactory;
 import com.paiagent.engine.llm.LLMNodeConfig;
 import com.paiagent.engine.llm.LLMProviderRegistry;
 import com.paiagent.engine.llm.PromptTemplateService;
+import com.paiagent.engine.llm.prompt.PromptCacheResult;
+import com.paiagent.engine.llm.prompt.PromptCacheService;
 import com.paiagent.engine.model.WorkflowNode;
 import com.paiagent.engine.skill.Skill;
 import com.paiagent.engine.skill.SkillRegistry;
@@ -49,6 +51,9 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
 
     @Autowired
     protected LLMGlobalConfigService llmGlobalConfigService;
+
+    @Autowired(required = false)
+    protected PromptCacheService promptCacheService;
 
     /**
      * 最大函数调用迭代次数
@@ -102,7 +107,11 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
         }
 
         // 3. 构建系统提示（直接包含所有 Skill 内容）
-        String systemPrompt = buildSystemPrompt(skill, skillReferences);
+        PromptCacheResult systemPromptCache = promptCache().cacheStablePrompt(
+                "llm." + getNodeType() + ".system",
+                buildSystemPrompt(skill, skillReferences)
+        );
+        String systemPrompt = systemPromptCache.content();
 
         // 4. 处理 prompt 模板
         String userPrompt = promptTemplateService.processTemplate(
@@ -144,6 +153,7 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
 
         // 7. 构建输出
         Map<String, Object> output = buildOutput(llmResponse, config.getOutputParams(), config.getSkillName());
+        appendPromptCacheMetadata(output, systemPromptCache);
         log.debug("{} 节点输出: {}", provider.toUpperCase(Locale.ROOT), summarizeForLog(output));
 
         return output;
@@ -164,6 +174,22 @@ public abstract class AbstractLLMNodeExecutor implements NodeExecutor {
         }
 
         return sb.toString();
+    }
+
+    private PromptCacheService promptCache() {
+        return promptCacheService == null ? PromptCacheService.noop() : promptCacheService;
+    }
+
+    private void appendPromptCacheMetadata(Map<String, Object> output, PromptCacheResult result) {
+        if (result == null || !result.cacheable()) {
+            output.put("promptCacheHit", false);
+            output.put("promptCacheKey", null);
+            output.put("promptCacheEstimatedSavedChars", 0);
+            return;
+        }
+        output.put("promptCacheHit", result.hit());
+        output.put("promptCacheKey", result.key());
+        output.put("promptCacheEstimatedSavedChars", result.estimatedSavedChars());
     }
 
     /**

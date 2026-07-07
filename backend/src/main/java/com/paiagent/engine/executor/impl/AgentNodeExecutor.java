@@ -145,6 +145,7 @@ public class AgentNodeExecutor implements NodeExecutor {
             Map<String, Object> output = buildOutput(runResult.finalState());
             output.put("collaborationMode", config.collaborationMode);
             output.put("agentTrace", runResult.trace());
+            appendTracePromptCacheTotals(output, runResult.trace());
             output.put("skillEvolutionCandidateRecorded",
                     recordSkillEvolutionCandidate(config, runResult.finalState()));
             log.info("Agent collaborative execution completed - stages={}, finalFinished={}",
@@ -441,7 +442,28 @@ public class AgentNodeExecutor implements NodeExecutor {
         item.put("iterations", state.getCurrentIteration());
         item.put("finalAnswer", state.getFinalAnswer());
         item.put("error", state.getErrorMessage());
+        item.put("promptCacheHits", state.getPromptCacheHits());
+        item.put("promptCacheMisses", state.getPromptCacheMisses());
+        item.put("promptCacheEstimatedSavedChars", state.getPromptCacheEstimatedSavedChars());
         return item;
+    }
+
+    private void appendTracePromptCacheTotals(Map<String, Object> output, List<Map<String, Object>> trace) {
+        if (trace == null || trace.isEmpty()) {
+            return;
+        }
+        output.put("promptCacheHits", sumTraceNumber(trace, "promptCacheHits"));
+        output.put("promptCacheMisses", sumTraceNumber(trace, "promptCacheMisses"));
+        output.put("promptCacheEstimatedSavedChars", sumTraceNumber(trace, "promptCacheEstimatedSavedChars"));
+    }
+
+    private long sumTraceNumber(List<Map<String, Object>> trace, String key) {
+        return trace.stream()
+                .map(stage -> stage.get(key))
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .mapToLong(Number::longValue)
+                .sum();
     }
 
     private boolean recordSkillEvolutionCandidate(AgentNodeConfig config, AgentState state) {
@@ -859,6 +881,9 @@ public class AgentNodeExecutor implements NodeExecutor {
         output.put("memoryContext", state.getMemoryContext());
         output.put("memoryCompressed", state.isMemoryCompressed());
         output.put("memoryCompressionRatio", state.getMemoryCompressionRatio());
+        output.put("promptCacheHits", state.getPromptCacheHits());
+        output.put("promptCacheMisses", state.getPromptCacheMisses());
+        output.put("promptCacheEstimatedSavedChars", state.getPromptCacheEstimatedSavedChars());
         output.put("collaborationMode", state.getSessionId() != null && state.getSessionId().contains(":")
                 ? "planner_worker_reviewer"
                 : "single");

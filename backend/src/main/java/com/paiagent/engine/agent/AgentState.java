@@ -37,6 +37,9 @@ public class AgentState {
     private String memoryContext;           // 记忆上下文（从知识库或执行记忆中检索）
     private boolean memoryCompressed;       // 记忆上下文是否经过压缩
     private Double memoryCompressionRatio;  // 压缩后长度 / 原始长度
+    private int promptCacheHits;
+    private int promptCacheMisses;
+    private long promptCacheEstimatedSavedChars;
 
     private String systemPrompt;
 
@@ -50,6 +53,9 @@ public class AgentState {
         this.createdAt = System.currentTimeMillis();
         this.memoryCompressed = false;
         this.memoryCompressionRatio = 1.0d;
+        this.promptCacheHits = 0;
+        this.promptCacheMisses = 0;
+        this.promptCacheEstimatedSavedChars = 0L;
     }
 
     /**
@@ -144,6 +150,15 @@ public class AgentState {
      */
     public String getMemoryContext() {
         return memoryContext;
+    }
+
+    public synchronized void recordPromptCacheLookup(boolean hit, int estimatedSavedChars) {
+        if (hit) {
+            this.promptCacheHits++;
+            this.promptCacheEstimatedSavedChars += Math.max(0, estimatedSavedChars);
+        } else {
+            this.promptCacheMisses++;
+        }
     }
 
     /**

@@ -22,15 +22,15 @@ public class ReActPromptBuilder {
      * 构建系统提示词（支持记忆上下文）
      */
     public static String buildSystemPrompt(List<Tool> tools, String customInstructions, String memoryContext) {
+        return appendMemoryContext(buildStableSystemPrompt(tools, customInstructions), memoryContext);
+    }
+
+    public static String buildStableSystemPrompt(List<Tool> tools, String customInstructions) {
         StringBuilder sb = new StringBuilder();
         sb.append("You are a helpful assistant that can use tools to solve problems.\n\n");
 
         if (customInstructions != null && !customInstructions.isBlank()) {
             sb.append(customInstructions).append("\n\n");
-        }
-
-        if (memoryContext != null && !memoryContext.isBlank()) {
-            sb.append("Relevant context from memory:\n").append(memoryContext).append("\n\n");
         }
 
         sb.append("Available tools:\n");
@@ -53,6 +53,14 @@ public class ReActPromptBuilder {
         sb.append("- If no tool is needed, provide the Final Answer directly.\n");
 
         return sb.toString().trim();
+    }
+
+    public static String appendMemoryContext(String stableSystemPrompt, String memoryContext) {
+        String base = stableSystemPrompt == null ? "" : stableSystemPrompt.trim();
+        if (memoryContext == null || memoryContext.isBlank()) {
+            return base;
+        }
+        return (base + "\n\nRelevant context from memory:\n" + memoryContext).trim();
     }
 
     /**

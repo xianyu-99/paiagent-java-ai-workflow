@@ -86,6 +86,11 @@ paiagent:
     api-key-secret: ${API_KEY_ENCRYPTION_SECRET:}
     # 本地 Qwen/Ollama/vLLM 等私网 OpenAI-compatible 地址需要显式开启
     allow-private-network-urls: ${PAIAGENT_ALLOW_PRIVATE_NETWORK_URLS:false}
+  prompt-cache:
+    enabled: ${PROMPT_CACHE_ENABLED:true}
+    ttl-seconds: ${PROMPT_CACHE_TTL_SECONDS:3600}
+    max-entries: ${PROMPT_CACHE_MAX_ENTRIES:2048}
+    minimum-chars: ${PROMPT_CACHE_MINIMUM_CHARS:256}
   auth:
     # 本地开发未配置 JWT_SECRET 时会自动生成临时强密钥；生产环境请务必显式配置
     jwt-secret: ${JWT_SECRET:}

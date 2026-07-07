@@ -19,4 +19,14 @@ class ReActPromptBuilderTest {
         assertThat(userPrompt).doesNotContain(memory);
         assertThat(userPrompt).contains("Task: VPN issue");
     }
+
+    @Test
+    void stableSystemPromptShouldExcludeDynamicMemoryContext() {
+        String stablePrompt = ReActPromptBuilder.buildStableSystemPrompt(List.of(), "custom");
+        String systemPrompt = ReActPromptBuilder.appendMemoryContext(stablePrompt, "dynamic memory");
+
+        assertThat(stablePrompt).doesNotContain("dynamic memory");
+        assertThat(systemPrompt).startsWith(stablePrompt);
+        assertThat(systemPrompt).contains("dynamic memory");
+    }
 }

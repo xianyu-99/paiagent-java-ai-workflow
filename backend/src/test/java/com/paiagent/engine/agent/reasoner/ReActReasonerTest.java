@@ -1,8 +1,10 @@
 package com.paiagent.engine.agent.reasoner;
 
+import com.paiagent.config.PromptCacheProperties;
 import com.paiagent.engine.agent.AgentState;
 import com.paiagent.engine.agent.ReasoningResult;
 import com.paiagent.engine.agent.tool.Tool;
+import com.paiagent.engine.llm.prompt.PromptCacheService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
@@ -136,5 +138,24 @@ class ReActReasonerTest {
         reasoner.reason(state, tools, chatClient);
 
         verify(requestSpec).system(contains("Always answer in JSON."));
+    }
+
+    @Test
+    void shouldRecordPromptCacheHitForRepeatedStableSystemPrompt() {
+        PromptCacheProperties properties = new PromptCacheProperties();
+        properties.setMinimumChars(1);
+        properties.setTtlSeconds(60);
+        properties.setMaxEntries(10);
+        reasoner = new ReActReasoner(new PromptCacheService(properties));
+        state.setSystemPrompt("Always answer in JSON.");
+        when(assistantMessage.getContent()).thenReturn(
+                "Thought: I can answer.\nFinal Answer: {\"answer\":\"4\"}");
+
+        reasoner.reason(state, tools, chatClient);
+        reasoner.reason(state, tools, chatClient);
+
+        assertEquals(1, state.getPromptCacheHits());
+        assertEquals(1, state.getPromptCacheMisses());
+        assertTrue(state.getPromptCacheEstimatedSavedChars() > 0);
     }
 }
