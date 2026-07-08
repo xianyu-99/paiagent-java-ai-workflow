@@ -101,6 +101,10 @@ public class KnowledgeGraphService {
                 .filter(id -> id != null && id > 0)
                 .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
 
+        if (isGlobalGraphQuery(query) && chunkIds.isEmpty()) {
+            return findGlobalEvidence(knowledgeBaseId, queryEntityNames, maxRelations);
+        }
+
         List<KnowledgeGraphRelation> firstHop = searchRelations(knowledgeBaseId, queryEntityNames, chunkIds, maxRelations);
         if (firstHop.isEmpty()) {
             return List.of();
@@ -137,6 +141,44 @@ public class KnowledgeGraphService {
         }
 
         return new ArrayList<>(evidence.values());
+    }
+
+    private List<GraphEvidence> findGlobalEvidence(Long knowledgeBaseId,
+                                                   Set<String> queryEntityNames,
+                                                   int maxRelations) {
+        List<KnowledgeGraphRelation> relations = queryEntityNames == null || queryEntityNames.isEmpty()
+                ? searchHighConfidenceRelations(knowledgeBaseId, maxRelations)
+                : searchRelations(knowledgeBaseId, queryEntityNames, Set.of(), maxRelations);
+        Map<String, GraphEvidence> evidence = new LinkedHashMap<>();
+        for (KnowledgeGraphRelation relation : relations) {
+            GraphEvidence graphEvidence = toEvidence(relation, 0);
+            evidence.putIfAbsent(evidenceKey(graphEvidence), graphEvidence);
+            if (evidence.size() >= maxRelations) {
+                break;
+            }
+        }
+        return new ArrayList<>(evidence.values());
+    }
+
+    private boolean isGlobalGraphQuery(String query) {
+        if (!StringUtils.hasText(query)) {
+            return false;
+        }
+        return query.contains("有哪些")
+                || query.contains("所有")
+                || query.contains("全部")
+                || query.contains("汇总")
+                || query.contains("列表")
+                || query.contains("整体")
+                || query.toLowerCase().contains("overview");
+    }
+
+    private List<KnowledgeGraphRelation> searchHighConfidenceRelations(Long knowledgeBaseId, int limit) {
+        return relationMapper.selectList(new QueryWrapper<KnowledgeGraphRelation>()
+                .eq("knowledge_base_id", knowledgeBaseId)
+                .eq("deleted", 0)
+                .orderByDesc("confidence")
+                .last("LIMIT " + Math.max(1, limit)));
     }
 
     private List<KnowledgeGraphRelation> searchRelations(Long knowledgeBaseId,
@@ -194,7 +236,7 @@ public class KnowledgeGraphService {
                     .eq("knowledge_base_id", knowledgeBaseId)
                     .eq("deleted", 0)
                     .last("LIMIT 200"))) {
-                if (normalized.contains(entity.getNormalizedName())) {
+                if (matchesEntity(normalized, entity)) {
                     names.add(entity.getNormalizedName());
                     if (names.size() >= MAX_QUERY_TERMS) {
                         break;
@@ -203,6 +245,45 @@ public class KnowledgeGraphService {
             }
         }
         return names;
+    }
+
+    private boolean matchesEntity(String normalizedQuery, KnowledgeGraphEntity entity) {
+        if (!StringUtils.hasText(normalizedQuery) || entity == null) {
+            return false;
+        }
+        if (StringUtils.hasText(entity.getNormalizedName())
+                && (normalizedQuery.contains(entity.getNormalizedName())
+                || entity.getNormalizedName().contains(normalizedQuery))) {
+            return true;
+        }
+        if (StringUtils.hasText(entity.getAliases())) {
+            for (String alias : entity.getAliases().split("\\|")) {
+                String normalizedAlias = extractor.normalize(alias);
+                if (StringUtils.hasText(normalizedAlias)
+                        && (normalizedQuery.contains(normalizedAlias)
+                        || normalizedAlias.contains(normalizedQuery))) {
+                    return true;
+                }
+            }
+        }
+        return entitySimilarity(normalizedQuery, entity.getNormalizedName()) >= 0.72d;
+    }
+
+    private double entitySimilarity(String left, String right) {
+        if (!StringUtils.hasText(left) || !StringUtils.hasText(right)) {
+            return 0.0d;
+        }
+        Set<String> leftChars = left.codePoints()
+                .mapToObj(Character::toString)
+                .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
+        Set<String> rightChars = right.codePoints()
+                .mapToObj(Character::toString)
+                .collect(LinkedHashSet::new, LinkedHashSet::add, LinkedHashSet::addAll);
+        Set<String> intersection = new LinkedHashSet<>(leftChars);
+        intersection.retainAll(rightChars);
+        Set<String> union = new LinkedHashSet<>(leftChars);
+        union.addAll(rightChars);
+        return union.isEmpty() ? 0.0d : (double) intersection.size() / union.size();
     }
 
     private Set<String> limitNames(Set<String> names, int limit) {

@@ -1,7 +1,11 @@
 package com.paiagent.service.graph;
 
+import com.paiagent.config.RagGraphExtractionProperties;
 import com.paiagent.entity.KnowledgeChunk;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,9 +83,111 @@ class KnowledgeGraphExtractorTest {
                 .contains("VPN", "VPN\u8bc1\u4e66", "\u5185\u90e8\u7cfb\u7edf");
     }
 
+    @Test
+    void shouldExtractConfiguredDictionaryEntityByAlias() {
+        RagGraphExtractionProperties properties = new RagGraphExtractionProperties();
+        properties.setDictionaryEntries(List.of(
+                "\u652f\u4ed8\u7cfb\u7edf|SYSTEM|Payment Service,payment-service;\u8ba2\u5355\u7cfb\u7edf|SYSTEM|order-service"
+        ));
+        KnowledgeGraphExtractor hybridExtractor = new KnowledgeGraphExtractor(properties, List.of());
+
+        assertThat(hybridExtractor.matchEntities("payment-service\u4f9d\u8d56\u8ba2\u5355\u7cfb\u7edf"))
+                .extracting(GraphExtractionResult.EntityMention::name)
+                .contains("\u652f\u4ed8\u7cfb\u7edf", "\u8ba2\u5355\u7cfb\u7edf");
+    }
+
+    @Test
+    void shouldMergeValidatedSemanticRelationsFromLlmLayer() {
+        GraphExtractionResult semanticResult = new GraphExtractionResult(
+                List.of(
+                        mention("\u5f20\u4e09", "PERSON", 0.91),
+                        mention("\u652f\u4ed8\u7cfb\u7edf", "SYSTEM", 0.90),
+                        mention("\u8ba2\u5355\u7cfb\u7edf", "SYSTEM", 0.90)
+                ),
+                List.of(
+                        relation("\u5f20\u4e09", "PERSON", "responsible_for",
+                                "\u652f\u4ed8\u7cfb\u7edf", "SYSTEM", "\u5f20\u4e09\u8d1f\u8d23\u652f\u4ed8\u7cfb\u7edf", 0.88),
+                        relation("\u652f\u4ed8\u7cfb\u7edf", "SYSTEM", "depends_on",
+                                "\u8ba2\u5355\u7cfb\u7edf", "SYSTEM", "\u652f\u4ed8\u7cfb\u7edf\u4f9d\u8d56\u8ba2\u5355\u7cfb\u7edf", 0.86)
+                )
+        );
+        KnowledgeGraphExtractor hybridExtractor = new KnowledgeGraphExtractor(
+                new RagGraphExtractionProperties(),
+                List.of((content, seedEntities) -> semanticResult)
+        );
+
+        GraphExtractionResult result = hybridExtractor.extract(chunk(
+                "\u5f20\u4e09\u8d1f\u8d23\u652f\u4ed8\u7cfb\u7edf\u3002\u652f\u4ed8\u7cfb\u7edf\u4f9d\u8d56\u8ba2\u5355\u7cfb\u7edf\u3002"));
+
+        assertThat(result.entities())
+                .extracting(GraphExtractionResult.EntityMention::name)
+                .contains("\u5f20\u4e09", "\u652f\u4ed8\u7cfb\u7edf", "\u8ba2\u5355\u7cfb\u7edf");
+        assertThat(result.relations())
+                .extracting(GraphExtractionResult.RelationMention::relationType)
+                .contains("responsible_for", "depends_on");
+    }
+
+    @Test
+    void shouldRejectSemanticRelationsWithoutValidTypeOrEvidence() {
+        GraphExtractionResult semanticResult = new GraphExtractionResult(
+                List.of(),
+                List.of(
+                        relation("\u5f20\u4e09", "PERSON", "invented_relation",
+                                "\u652f\u4ed8\u7cfb\u7edf", "SYSTEM", "\u5f20\u4e09\u8d1f\u8d23\u652f\u4ed8\u7cfb\u7edf", 0.88),
+                        relation("\u5f20\u4e09", "PERSON", "responsible_for",
+                                "\u8d22\u52a1\u7cfb\u7edf", "SYSTEM", "\u5f20\u4e09\u8d1f\u8d23\u652f\u4ed8\u7cfb\u7edf", 0.88)
+                )
+        );
+        KnowledgeGraphExtractor hybridExtractor = new KnowledgeGraphExtractor(
+                new RagGraphExtractionProperties(),
+                List.of((content, seedEntities) -> semanticResult)
+        );
+
+        GraphExtractionResult result = hybridExtractor.extract(chunk(
+                "\u5f20\u4e09\u8d1f\u8d23\u652f\u4ed8\u7cfb\u7edf\u3002"));
+
+        assertThat(result.relations())
+                .extracting(GraphExtractionResult.RelationMention::relationType)
+                .doesNotContain("invented_relation", "responsible_for");
+        assertThat(result.entities())
+                .extracting(GraphExtractionResult.EntityMention::name)
+                .doesNotContain("\u8d22\u52a1\u7cfb\u7edf");
+    }
+
     private KnowledgeChunk chunk(String content) {
         KnowledgeChunk chunk = new KnowledgeChunk();
         chunk.setContent(content);
         return chunk;
+    }
+
+    private GraphExtractionResult.RelationMention relation(String source,
+                                                           String sourceType,
+                                                           String relationType,
+                                                           String target,
+                                                           String targetType,
+                                                           String evidence,
+                                                           double confidence) {
+        return new GraphExtractionResult.RelationMention(
+                mention(source, sourceType, confidence),
+                relationType,
+                mention(target, targetType, confidence),
+                evidence,
+                confidence
+        );
+    }
+
+    private GraphExtractionResult.EntityMention mention(String name, String type, double confidence) {
+        return new GraphExtractionResult.EntityMention(
+                name,
+                normalize(name),
+                type,
+                List.of(),
+                confidence
+        );
+    }
+
+    private String normalize(String value) {
+        return value.toLowerCase(Locale.ROOT)
+                .replaceAll("[\\s\\p{Punct}\u3001\uff0c\u3002\uff1b\uff1a\uff01\uff1f\u201c\u201d\u2018\u2019\uff08\uff09\u3010\u3011\u300a\u300b\\[\\]{}]+", "");
     }
 }

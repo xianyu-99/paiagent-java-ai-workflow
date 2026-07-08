@@ -84,6 +84,47 @@ class KnowledgeBaseServiceTest {
     }
 
     @Test
+    void retrieveUsesParentSectionContextBeforeAdjacentWindow() {
+        KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
+        TextEmbeddingService embeddingService = mock(TextEmbeddingService.class);
+        KnowledgeVectorStore vectorStore = mock(KnowledgeVectorStore.class);
+        RagRetrievalScorer scorer = scorer();
+
+        KnowledgeBaseService service = new KnowledgeBaseService(
+                mock(KnowledgeBaseMapper.class),
+                mock(KnowledgeDocumentMapper.class),
+                chunkMapper,
+                mock(KnowledgeImportTaskMapper.class),
+                embeddingService,
+                vectorStore,
+                mock(DocumentParsingService.class),
+                scorer,
+                mock(ThreadPoolTaskExecutor.class)
+        );
+
+        KnowledgeChunk parentStart = chunk(41L, 1L, 90L, 1, "parent section opening policy");
+        KnowledgeChunk center = chunk(42L, 1L, 90L, 5, "target approval rule");
+        KnowledgeChunk parentEnd = chunk(43L, 1L, 90L, 9, "parent section closing SLA");
+
+        when(embeddingService.embed("approval rule")).thenReturn(List.of(0.1, 0.2));
+        when(embeddingService.isCompatible(any(), any(), any())).thenReturn(true);
+        when(vectorStore.search(eq(1L), any(), eq(13), eq(0.0)))
+                .thenReturn(List.of(new VectorSearchHit(42L, 0.91)));
+        when(chunkMapper.selectBatchIds(anyCollection())).thenReturn(List.of(center));
+        when(chunkMapper.selectList(any()))
+                .thenReturn(List.of(), List.of(parentStart, center, parentEnd));
+
+        List<RetrievedChunk> chunks = service.retrieve(1L, "approval rule", 1, 0.0, 1, 2000);
+
+        assertEquals(1, chunks.size());
+        RetrievedChunk retrieved = chunks.get(0);
+        assertEquals(List.of(1, 5, 9), retrieved.getContextChunkIndexes());
+        assertTrue(retrieved.getContextContent().contains("parent section opening policy"));
+        assertTrue(retrieved.getContextContent().contains("target approval rule"));
+        assertTrue(retrieved.getContextContent().contains("parent section closing SLA"));
+    }
+
+    @Test
     void shouldFallbackToKeywordRetrievalWhenEmbeddingProviderIsUnavailable() {
         KnowledgeChunkMapper chunkMapper = mock(KnowledgeChunkMapper.class);
         TextEmbeddingService embeddingService = mock(TextEmbeddingService.class);

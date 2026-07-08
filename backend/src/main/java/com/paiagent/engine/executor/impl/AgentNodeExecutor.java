@@ -476,7 +476,7 @@ public class AgentNodeExecutor implements NodeExecutor {
         boolean failed = !isBlank(error);
         boolean blankAnswer = isBlank(finalAnswer) && !failed;
         boolean memoryCompressed = state.isMemoryCompressed();
-        SkillEvolutionIssue answerQualityIssue = detectAnswerQualityIssue(finalAnswer);
+        SkillEvolutionIssue answerQualityIssue = detectAnswerQualityIssue(state, finalAnswer);
         if (!failed && !blankAnswer && answerQualityIssue == null && !memoryCompressed) {
             return false;
         }
@@ -505,7 +505,7 @@ public class AgentNodeExecutor implements NodeExecutor {
         }
     }
 
-    private SkillEvolutionIssue detectAnswerQualityIssue(String finalAnswer) {
+    private SkillEvolutionIssue detectAnswerQualityIssue(AgentState state, String finalAnswer) {
         Map<String, Object> answer = parseStructuredAnswer(finalAnswer);
         if (answer == null || !looksLikeQualityAwareAnswer(answer)) {
             return null;
@@ -523,6 +523,16 @@ public class AgentNodeExecutor implements NodeExecutor {
             return new SkillEvolutionIssue(
                     "MISSING_CITATION",
                     "Agent returned a structured answer without citations."
+            );
+        }
+
+        List<String> unsupportedCitations = unsupportedCitations(answer.get("citations"),
+                state == null ? null : state.getMemoryContext());
+        if (!unsupportedCitations.isEmpty()) {
+            return new SkillEvolutionIssue(
+                    "UNSUPPORTED_CITATION",
+                    "Agent returned citations that are not grounded in retrieved context: "
+                            + String.join(", ", unsupportedCitations)
             );
         }
 
@@ -577,6 +587,65 @@ public class AgentNodeExecutor implements NodeExecutor {
             return map.isEmpty();
         }
         return citations.toString().isBlank();
+    }
+
+    private List<String> unsupportedCitations(Object citations, String memoryContext) {
+        List<String> citationTexts = citationTexts(citations);
+        if (citationTexts.isEmpty() || isBlank(memoryContext)) {
+            return List.of();
+        }
+        String normalizedContext = normalizeCitationText(memoryContext);
+        List<String> unsupported = new ArrayList<>();
+        for (String citation : citationTexts) {
+            String normalizedCitation = normalizeCitationText(citation);
+            if (!normalizedCitation.isBlank() && !normalizedContext.contains(normalizedCitation)) {
+                unsupported.add(citation);
+            }
+        }
+        return unsupported;
+    }
+
+    private List<String> citationTexts(Object citations) {
+        if (citations == null) {
+            return List.of();
+        }
+        List<String> texts = new ArrayList<>();
+        if (citations instanceof Collection<?> collection) {
+            for (Object value : collection) {
+                String text = citationText(value);
+                if (!isBlank(text)) {
+                    texts.add(text);
+                }
+            }
+            return texts;
+        }
+        String text = citationText(citations);
+        return isBlank(text) ? List.of() : List.of(text);
+    }
+
+    private String citationText(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (String key : List.of("source", "title", "fileName", "chunkId", "documentId", "evidence")) {
+                Object field = map.get(key);
+                if (field != null && !field.toString().isBlank()) {
+                    return field.toString();
+                }
+            }
+            return "";
+        }
+        return value.toString();
+    }
+
+    private String normalizeCitationText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.toLowerCase(Locale.ROOT)
+                .replaceAll("[\\s\\p{Punct}，。；：、！？“”‘’（）()【】《》\\[\\]{}]+", "")
+                .trim();
     }
 
     private Double toDouble(Object value) {

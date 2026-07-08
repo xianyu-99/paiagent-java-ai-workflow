@@ -140,6 +140,19 @@ paiagent:
       cache-max-size: ${RAG_RERANK_CACHE_MAX_SIZE:2048}
     graph:
       backfill-enabled: ${RAG_GRAPH_BACKFILL_ENABLED:true}
+      extraction:
+        dictionary-enabled: ${RAG_GRAPH_DICTIONARY_ENABLED:true}
+        dictionary-entries: ${RAG_GRAPH_DICTIONARY_ENTRIES:}
+        llm-enabled: ${RAG_GRAPH_LLM_ENABLED:false}
+        llm-provider: ${RAG_GRAPH_LLM_PROVIDER:local_qwen}
+        llm-base-url: ${RAG_GRAPH_LLM_BASE_URL:http://127.0.0.1:11434/v1}
+        llm-api-key: ${RAG_GRAPH_LLM_API_KEY:ollama}
+        llm-model: ${RAG_GRAPH_LLM_MODEL:qwen2.5:7b}
+        llm-temperature: ${RAG_GRAPH_LLM_TEMPERATURE:0.1}
+        max-chunk-chars: ${RAG_GRAPH_LLM_MAX_CHUNK_CHARS:3000}
+        max-llm-entities: ${RAG_GRAPH_LLM_MAX_ENTITIES:24}
+        max-llm-relations: ${RAG_GRAPH_LLM_MAX_RELATIONS:32}
+        min-llm-confidence: ${RAG_GRAPH_LLM_MIN_CONFIDENCE:0.62}
     embedding:
       provider: ${RAG_EMBEDDING_PROVIDER:dashscope}
       base-url: ${RAG_EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}

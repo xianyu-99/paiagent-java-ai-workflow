@@ -1,22 +1,31 @@
 package com.paiagent.service.graph;
 
+import com.paiagent.config.RagGraphExtractionProperties;
 import com.paiagent.entity.KnowledgeChunk;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+@Slf4j
 @Component
 public class KnowledgeGraphExtractor {
 
     private static final int MAX_ENTITIES = 32;
     private static final int MAX_RELATIONS = 48;
+    private static final double DICTIONARY_CONFIDENCE = 0.86d;
 
     private static final Pattern SENTENCE_SPLIT = Pattern.compile("[。！？!?；;\\n]+");
     private static final Pattern BOOK_TITLE_PATTERN = Pattern.compile("[《\\[]([^》\\]\\n]{2,40})[》\\]]");
@@ -31,6 +40,34 @@ public class KnowledgeGraphExtractor {
             "(\\d+(?:\\.\\d+)?\\s*(?:万元|元|万|人民币|CNY|RMB))"
     );
 
+    private static final Set<String> ALLOWED_ENTITY_TYPES = Set.of(
+            "PROCESS", "ROLE", "PERSON", "DEPARTMENT", "MATERIAL", "SYSTEM",
+            "SLA", "THRESHOLD", "CONCEPT", "DOCUMENT"
+    );
+    private static final Set<String> ALLOWED_RELATION_TYPES = Set.of(
+            "requires_material", "requires_approval_by", "handled_by", "responsible_for",
+            "depends_on", "has_sla", "has_threshold", "impacts", "causes", "related_to"
+    );
+
+    private final RagGraphExtractionProperties properties;
+    private final List<GraphSemanticExtractor> semanticExtractors;
+
+    public KnowledgeGraphExtractor() {
+        this(new RagGraphExtractionProperties(), List.of());
+    }
+
+    @Autowired
+    public KnowledgeGraphExtractor(RagGraphExtractionProperties properties,
+                                   ObjectProvider<GraphSemanticExtractor> semanticExtractors) {
+        this(properties, semanticExtractors == null ? List.of() : semanticExtractors.orderedStream().toList());
+    }
+
+    public KnowledgeGraphExtractor(RagGraphExtractionProperties properties,
+                                   List<GraphSemanticExtractor> semanticExtractors) {
+        this.properties = properties == null ? new RagGraphExtractionProperties() : properties;
+        this.semanticExtractors = semanticExtractors == null ? List.of() : semanticExtractors;
+    }
+
     public GraphExtractionResult extract(KnowledgeChunk chunk) {
         if (chunk == null || !StringUtils.hasText(chunk.getContent())) {
             return new GraphExtractionResult(List.of(), List.of());
@@ -43,6 +80,7 @@ public class KnowledgeGraphExtractor {
         }
 
         List<GraphExtractionResult.RelationMention> relations = inferRelations(content, entities);
+        mergeSemanticExtractions(content, entities, relations);
         for (GraphExtractionResult.RelationMention relation : relations) {
             putEntity(entities, relation.source());
             putEntity(entities, relation.target());
@@ -63,6 +101,7 @@ public class KnowledgeGraphExtractor {
         extractQuotedEntities(text, entities);
         extractUpperTokenEntities(text, entities);
         extractSuffixEntities(text, entities);
+        extractDictionaryEntities(text, entities);
         for (String sentence : splitSentences(text)) {
             extractCueEntities(sentence, entities);
             if (entities.size() >= MAX_ENTITIES) {
@@ -103,6 +142,77 @@ public class KnowledgeGraphExtractor {
             String name = cleanEntityCandidate(matcher.group(1));
             addCandidate(entities, name, inferEntityType(name, text), 0.74);
         }
+    }
+
+    private void extractDictionaryEntities(String text, Map<String, GraphExtractionResult.EntityMention> entities) {
+        if (!properties.isDictionaryEnabled() || !StringUtils.hasText(text)) {
+            return;
+        }
+        String normalizedText = normalize(text);
+        for (DictionaryEntry entry : dictionaryEntries()) {
+            if (entities.size() >= MAX_ENTITIES) {
+                return;
+            }
+            if (dictionaryEntryMatches(normalizedText, entry)) {
+                putEntity(entities, new GraphExtractionResult.EntityMention(
+                        entry.name(),
+                        normalize(entry.name()),
+                        safeEntityType(entry.entityType(), inferEntityType(entry.name(), text)),
+                        entry.aliases(),
+                        DICTIONARY_CONFIDENCE
+                ));
+            }
+        }
+    }
+
+    private boolean dictionaryEntryMatches(String normalizedText, DictionaryEntry entry) {
+        if (normalizedText.contains(normalize(entry.name()))) {
+            return true;
+        }
+        for (String alias : entry.aliases()) {
+            if (StringUtils.hasText(alias) && normalizedText.contains(normalize(alias))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<DictionaryEntry> dictionaryEntries() {
+        List<String> configured = properties.getDictionaryEntries();
+        if (configured == null || configured.isEmpty()) {
+            return List.of();
+        }
+        List<DictionaryEntry> entries = new ArrayList<>();
+        for (String value : configured) {
+            for (String token : value.split("[;；\\n]")) {
+                DictionaryEntry entry = parseDictionaryEntry(token);
+                if (entry != null) {
+                    entries.add(entry);
+                }
+            }
+        }
+        return entries;
+    }
+
+    private DictionaryEntry parseDictionaryEntry(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String[] parts = value.split("\\|", -1);
+        String name = cleanEntityCandidate(parts[0]);
+        if (!isUsefulEntity(name)) {
+            return null;
+        }
+        String entityType = parts.length > 1 && StringUtils.hasText(parts[1])
+                ? parts[1].trim().toUpperCase(Locale.ROOT)
+                : inferEntityType(name, name);
+        List<String> aliases = parts.length > 2
+                ? Arrays.stream(parts[2].split("[,，]"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .toList()
+                : List.of();
+        return new DictionaryEntry(name, safeEntityType(entityType, inferEntityType(name, name)), aliases);
     }
 
     private void extractCueEntities(String sentence, Map<String, GraphExtractionResult.EntityMention> entities) {
@@ -146,6 +256,120 @@ public class KnowledgeGraphExtractor {
             }
         }
         return deduplicate(relations);
+    }
+
+    private void mergeSemanticExtractions(String content,
+                                          Map<String, GraphExtractionResult.EntityMention> entities,
+                                          List<GraphExtractionResult.RelationMention> relations) {
+        if (semanticExtractors.isEmpty() || !StringUtils.hasText(content)) {
+            return;
+        }
+        List<GraphExtractionResult.EntityMention> seedEntities = new ArrayList<>(entities.values());
+        for (GraphSemanticExtractor semanticExtractor : semanticExtractors) {
+            try {
+                GraphExtractionResult semanticResult = semanticExtractor.extract(content, seedEntities);
+                mergeSemanticResult(content, semanticResult, entities, relations);
+            } catch (Exception e) {
+                log.warn("Semantic graph extraction skipped: {}", e.getMessage());
+            }
+        }
+    }
+
+    private void mergeSemanticResult(String content,
+                                     GraphExtractionResult semanticResult,
+                                     Map<String, GraphExtractionResult.EntityMention> entities,
+                                     List<GraphExtractionResult.RelationMention> relations) {
+        if (semanticResult == null) {
+            return;
+        }
+        for (GraphExtractionResult.EntityMention mention : semanticResult.entities()) {
+            GraphExtractionResult.EntityMention validated = validateSemanticEntity(mention);
+            if (validated != null) {
+                putEntity(entities, validated);
+            }
+        }
+        for (GraphExtractionResult.RelationMention mention : semanticResult.relations()) {
+            GraphExtractionResult.RelationMention validated = validateSemanticRelation(content, mention, entities);
+            if (validated != null) {
+                relations.add(validated);
+                putEntity(entities, validated.source());
+                putEntity(entities, validated.target());
+            }
+        }
+    }
+
+    private GraphExtractionResult.EntityMention validateSemanticEntity(GraphExtractionResult.EntityMention mention) {
+        if (mention == null
+                || !isUsefulEntity(mention.name())
+                || mention.confidence() < properties.getMinLlmConfidence()) {
+            return null;
+        }
+        String entityType = safeEntityType(mention.entityType(), inferEntityType(mention.name(), mention.name()));
+        return new GraphExtractionResult.EntityMention(
+                cleanEntityCandidate(mention.name()),
+                normalize(mention.name()),
+                entityType,
+                cleanAliases(mention.aliases()),
+                boundedConfidence(mention.confidence())
+        );
+    }
+
+    private GraphExtractionResult.RelationMention validateSemanticRelation(
+            String content,
+            GraphExtractionResult.RelationMention mention,
+            Map<String, GraphExtractionResult.EntityMention> entities
+    ) {
+        String relationType = normalizeRelationType(mention == null ? null : mention.relationType());
+        if (mention == null
+                || mention.source() == null
+                || mention.target() == null
+                || !ALLOWED_RELATION_TYPES.contains(relationType)
+                || mention.confidence() < properties.getMinLlmConfidence()) {
+            return null;
+        }
+        String evidence = mention.evidence() == null ? "" : mention.evidence().trim();
+        if (!StringUtils.hasText(evidence) || !content.contains(evidence)) {
+            return null;
+        }
+        String sourceName = cleanEntityCandidate(mention.source().name());
+        String targetName = cleanEntityCandidate(mention.target().name());
+        if (!isUsefulEntity(sourceName) || !isUsefulEntity(targetName) || normalize(sourceName).equals(normalize(targetName))) {
+            return null;
+        }
+        String normalizedEvidence = normalize(evidence);
+        if (!normalizedEvidence.contains(normalize(sourceName)) || !normalizedEvidence.contains(normalize(targetName))) {
+            return null;
+        }
+
+        GraphExtractionResult.EntityMention source = normalizedSemanticEndpoint(
+                mention.source(), sourceName, content, entities);
+        GraphExtractionResult.EntityMention target = normalizedSemanticEndpoint(
+                mention.target(), targetName, content, entities);
+        if (source == null || target == null || source.normalizedName().equals(target.normalizedName())) {
+            return null;
+        }
+        return relation(source, relationType, target, compactEvidence(evidence), boundedConfidence(mention.confidence()));
+    }
+
+    private GraphExtractionResult.EntityMention normalizedSemanticEndpoint(
+            GraphExtractionResult.EntityMention mention,
+            String name,
+            String content,
+            Map<String, GraphExtractionResult.EntityMention> entities
+    ) {
+        String normalizedName = normalize(name);
+        GraphExtractionResult.EntityMention existing = entities.get(normalizedName);
+        if (existing != null) {
+            return existing;
+        }
+        String entityType = safeEntityType(mention.entityType(), inferEntityType(name, content));
+        return new GraphExtractionResult.EntityMention(
+                name,
+                normalizedName,
+                entityType,
+                cleanAliases(mention.aliases()),
+                boundedConfidence(mention.confidence())
+        );
     }
 
     private void extractRelationTargets(String sentence,
@@ -371,10 +595,47 @@ public class KnowledgeGraphExtractor {
         return new GraphExtractionResult.EntityMention(
                 cleaned,
                 normalize(cleaned),
-                entityType == null ? "CONCEPT" : entityType,
+                safeEntityType(entityType, "CONCEPT"),
                 List.of(),
-                confidence
+                boundedConfidence(confidence)
         );
+    }
+
+    private String safeEntityType(String entityType, String fallback) {
+        String safeFallback = StringUtils.hasText(fallback) ? fallback.toUpperCase(Locale.ROOT) : "CONCEPT";
+        if (!ALLOWED_ENTITY_TYPES.contains(safeFallback)) {
+            safeFallback = "CONCEPT";
+        }
+        if (!StringUtils.hasText(entityType)) {
+            return safeFallback;
+        }
+        String normalizedType = entityType.trim().toUpperCase(Locale.ROOT);
+        return ALLOWED_ENTITY_TYPES.contains(normalizedType) ? normalizedType : safeFallback;
+    }
+
+    private List<String> cleanAliases(List<String> aliases) {
+        if (aliases == null || aliases.isEmpty()) {
+            return List.of();
+        }
+        Set<String> cleaned = new LinkedHashSet<>();
+        for (String alias : aliases) {
+            String value = cleanEntityCandidate(alias);
+            if (isUsefulEntity(value)) {
+                cleaned.add(value);
+            }
+        }
+        return new ArrayList<>(cleaned);
+    }
+
+    private double boundedConfidence(double confidence) {
+        if (Double.isNaN(confidence)) {
+            return 0.0d;
+        }
+        return Math.max(0.0d, Math.min(1.0d, confidence));
+    }
+
+    private String normalizeRelationType(String relationType) {
+        return StringUtils.hasText(relationType) ? relationType.trim().toLowerCase(Locale.ROOT) : "";
     }
 
     private boolean isUsefulEntity(String value) {
@@ -516,5 +777,8 @@ public class KnowledgeGraphExtractor {
             }
         }
         return false;
+    }
+
+    private record DictionaryEntry(String name, String entityType, List<String> aliases) {
     }
 }

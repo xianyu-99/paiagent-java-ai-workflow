@@ -4,6 +4,7 @@ import com.paiagent.dto.ExecutionEvent;
 import com.paiagent.engine.agent.AgentState;
 import com.paiagent.engine.agent.ReasoningEngine;
 import com.paiagent.engine.agent.ReasoningResult;
+import com.paiagent.engine.agent.memory.AgentMemoryService;
 import com.paiagent.engine.agent.tool.Tool;
 import com.paiagent.engine.agent.tool.ToolRegistry;
 import com.paiagent.engine.llm.ChatClientFactory;
@@ -44,6 +45,9 @@ class AgentNodeExecutorTest {
 
     @Mock
     SkillEvolutionService skillEvolutionService;
+
+    @Mock
+    AgentMemoryService agentMemoryService;
 
     @Mock
     ChatClient chatClient;
@@ -457,6 +461,46 @@ class AgentNodeExecutorTest {
                 isNull(),
                 eq("MISSING_CITATION"),
                 contains("without citations"),
+                contains("VPN issue")
+        );
+    }
+
+    @Test
+    void shouldRecordSkillEvolutionCandidateWhenCitationIsNotGroundedInMemoryContext() throws Exception {
+        Map<String, Object> data = validConfig();
+        data.put("skillName", "service-desk-answer");
+        data.put("knowledgeBaseId", 42L);
+        WorkflowNode node = agentNode(data);
+
+        when(agentMemoryService.buildMemoryContextWithMetadata(
+                eq("VPN issue"), eq(42L), isNull(), eq(false), eq(3), eq(0.5)))
+                .thenReturn(new AgentMemoryService.MemoryContextResult(
+                        "=== Knowledge Context ===\n[vpn.md] VPN profile reset guide.",
+                        false,
+                        1.0d,
+                        64,
+                        64,
+                        0
+                ));
+        when(toolRegistry.getAllTools()).thenReturn(Collections.emptyList());
+        when(chatClientFactory.createClient(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(chatClient);
+        when(reasoningEngine.getMode()).thenReturn("react");
+        when(reasoningEngine.reason(any(AgentState.class), anyList(), eq(chatClient)))
+                .thenReturn(ReasoningResult.finalAnswer(
+                        "Done",
+                        "{\"answer\":\"Restart the VPN profile.\",\"citations\":[{\"source\":\"hr.md\"}],\"confidence\":0.86}"
+                ));
+
+        Map<String, Object> output = executor.execute(node, Map.of("input", "VPN issue"));
+
+        assertEquals(Boolean.TRUE, output.get("skillEvolutionCandidateRecorded"));
+        verify(skillEvolutionService).recordCandidate(
+                eq("service-desk-answer"),
+                eq("AGENT_EXECUTION"),
+                isNull(),
+                eq("UNSUPPORTED_CITATION"),
+                contains("hr.md"),
                 contains("VPN issue")
         );
     }

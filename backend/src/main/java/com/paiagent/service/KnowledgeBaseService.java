@@ -1231,12 +1231,51 @@ public class KnowledgeBaseService {
             candidate.rank(rank++);
             candidate.matchedTerms(ragRetrievalScorer.matchedTerms(query, candidate.chunk()));
 
-            List<KnowledgeChunk> contextChunks = loadContextWindow(candidate.chunk(), contextWindow);
+            List<KnowledgeChunk> contextChunks = loadParentChildContext(candidate.chunk(), contextWindow);
             candidate.contextChunkIndexes(contextChunks.stream()
                     .map(KnowledgeChunk::getChunkIndex)
                     .toList());
             candidate.contextContent(buildContextContent(contextChunks, contextMaxChars));
         }
+    }
+
+    private List<KnowledgeChunk> loadParentChildContext(KnowledgeChunk centerChunk, int contextWindow) {
+        if (centerChunk == null) {
+            return List.of();
+        }
+        if (contextWindow <= 0) {
+            return loadContextWindow(centerChunk, contextWindow);
+        }
+        List<KnowledgeChunk> parentChunks = loadParentSectionContext(centerChunk);
+        if (!parentChunks.isEmpty()) {
+            return parentChunks;
+        }
+        return loadContextWindow(centerChunk, contextWindow);
+    }
+
+    private List<KnowledgeChunk> loadParentSectionContext(KnowledgeChunk centerChunk) {
+        if (centerChunk == null || centerChunk.getDocumentId() == null) {
+            return List.of();
+        }
+        LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<KnowledgeChunk>()
+                .eq(KnowledgeChunk::getKnowledgeBaseId, centerChunk.getKnowledgeBaseId())
+                .eq(KnowledgeChunk::getDocumentId, centerChunk.getDocumentId())
+                .orderByAsc(KnowledgeChunk::getChunkIndex)
+                .last("LIMIT 12");
+        if (StringUtils.hasText(centerChunk.getSectionTitle())) {
+            wrapper.eq(KnowledgeChunk::getSectionTitle, centerChunk.getSectionTitle());
+        } else if (centerChunk.getPageNumber() != null) {
+            wrapper.eq(KnowledgeChunk::getPageNumber, centerChunk.getPageNumber());
+        } else {
+            return List.of();
+        }
+        List<KnowledgeChunk> parentChunks = knowledgeChunkMapper.selectList(wrapper);
+        if (parentChunks == null || parentChunks.isEmpty()) {
+            return List.of();
+        }
+        boolean containsCenter = parentChunks.stream()
+                .anyMatch(chunk -> centerChunk.getId() != null && centerChunk.getId().equals(chunk.getId()));
+        return containsCenter ? parentChunks : List.of();
     }
 
     private List<KnowledgeChunk> loadContextWindow(KnowledgeChunk centerChunk, int contextWindow) {
@@ -1254,7 +1293,7 @@ public class KnowledgeBaseService {
                 .eq(KnowledgeChunk::getDocumentId, centerChunk.getDocumentId())
                 .between(KnowledgeChunk::getChunkIndex, startIndex, endIndex)
                 .orderByAsc(KnowledgeChunk::getChunkIndex));
-        return contextChunks.isEmpty() ? List.of(centerChunk) : contextChunks;
+        return contextChunks == null || contextChunks.isEmpty() ? List.of(centerChunk) : contextChunks;
     }
 
     private String buildContextContent(List<KnowledgeChunk> contextChunks, int contextMaxChars) {
